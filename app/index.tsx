@@ -33,7 +33,6 @@ import Animated, {
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 
 import { useAuth } from '@/hooks/useAuth';
-import { Platform as RNPlatform } from 'react-native';
 import { blink } from '@/lib/blink';
 import { colors, spacing, typography, borderRadius, shadows } from '@/constants/design';
 
@@ -205,12 +204,14 @@ function OnboardingScreen({
   onEmailSignup,
   loading,
   authError,
+  isWeb,
 }: {
   onGoogleLogin: () => void;
   onEmailLogin: (e: string, p: string) => void;
   onEmailSignup: (e: string, p: string) => void;
   loading: boolean;
   authError: string | null;
+  isWeb: boolean;
 }) {
   const STEPS = [
     { icon: 'flash-circle', title: 'RECON HFT', sub: 'Bayesian edge detection\nfor 5-minute BTC markets.' },
@@ -218,7 +219,8 @@ function OnboardingScreen({
     { icon: 'shield-check', title: 'RISK\nCONTROLLED', sub: 'Kelly sizing, delta hedging\nand drawdown protection built-in.' },
   ];
   const [step, setStep] = useState(0);
-  const [authMode, setAuthMode] = useState<'options' | 'email'>('options');
+  // On web, skip straight to email — Google OAuth requires a popup which is blocked in the preview iframe
+  const [authMode, setAuthMode] = useState<'options' | 'email'>(isWeb ? 'email' : 'options');
   const [emailSignup, setEmailSignup] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -285,20 +287,33 @@ function OnboardingScreen({
           </TouchableOpacity>
         ) : authMode === 'options' ? (
           <>
-            <TouchableOpacity style={ob.btn} onPress={onGoogleLogin} disabled={loading}>
+            {/* Google — native only */}
+            {!isWeb && (
+              <TouchableOpacity style={ob.btn} onPress={onGoogleLogin} disabled={loading}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                  <Ionicons name="logo-google" size={20} color="#000" />
+                  <Text style={ob.btnText}>{loading ? 'CONNECTING…' : 'SIGN IN WITH GOOGLE'}</Text>
+                </View>
+              </TouchableOpacity>
+            )}
+            <TouchableOpacity style={isWeb ? ob.btn : ob.secondaryBtn} onPress={() => setAuthMode('email')}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-                <Ionicons name="logo-google" size={20} color="#000" />
-                <Text style={ob.btnText}>{loading ? 'CONNECTING…' : 'SIGN IN WITH GOOGLE'}</Text>
+                <Ionicons name="mail-outline" size={18} color={isWeb ? '#000' : colors.primary} />
+                <Text style={isWeb ? ob.btnText : ob.secondaryBtnText}>
+                  {isWeb ? 'SIGN IN / REGISTER' : 'CONTINUE WITH EMAIL'}
+                </Text>
               </View>
             </TouchableOpacity>
-            <TouchableOpacity style={ob.secondaryBtn} onPress={() => setAuthMode('email')}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-                <Ionicons name="mail-outline" size={18} color={colors.primary} />
-                <Text style={ob.secondaryBtnText}>CONTINUE WITH EMAIL</Text>
+            {isWeb && (
+              <View style={ob.webNote}>
+                <Ionicons name="information-circle-outline" size={14} color="#555" />
+                <Text style={ob.webNoteText}>
+                  Google sign-in is available on iOS & Android. Use email on web.
+                </Text>
               </View>
-            </TouchableOpacity>
+            )}
             <Text style={ob.disclaimer}>
-              Trading prediction markets is high risk.\nOnly use capital you can afford to lose.
+              Trading prediction markets is high risk.{'\n'}Only use capital you can afford to lose.
             </Text>
           </>
         ) : (
@@ -377,6 +392,8 @@ const ob = StyleSheet.create({
   input: { flex: 1, fontSize: 14, color: '#fff', height: 22 },
   toggleMode: { alignItems: 'center', paddingVertical: 6 },
   toggleText: { fontSize: 12, color: '#555', fontWeight: '600' },
+  webNote: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#0d0d0d', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8 },
+  webNoteText: { flex: 1, fontSize: 11, color: '#555', lineHeight: 16 },
 });
 
 // ─────────────────────────────────────────────
@@ -752,6 +769,7 @@ export default function Home() {
     isLoading: authLoading,
     isAuthenticated,
     authError,
+    isWeb,
     signInWithGoogle,
     signInWithEmail,
     signUpWithEmail,
@@ -817,6 +835,7 @@ export default function Home() {
         onEmailSignup={handleEmailSignup}
         loading={loginLoading}
         authError={authError}
+        isWeb={isWeb}
       />
     );
   }
