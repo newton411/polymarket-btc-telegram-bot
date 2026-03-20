@@ -39,8 +39,48 @@ load_dotenv()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-#  DATA STRUCTURES
+#  PRICE FEED SYSTEM
 # ─────────────────────────────────────────────────────────────────────────────
+class PriceFeed:
+    """Multi-provider price feed with fallbacks."""
+
+    def __init__(self):
+        self.primary_exchange = ccxt.binance({"enableRateLimit": True})
+        self.fallback_exchange = ccxt.kraken({"enableRateLimit": True})  # Fallback exchange
+        self.last_price = Decimal("0.0")
+        self.last_update = None
+
+    async def get_btc_price(self) -> Decimal:
+        """Get BTC price with fallback providers."""
+        try:
+            # Try primary provider (Binance)
+            ticker = await self.primary_exchange.fetch_ticker("BTC/USDT")
+            price = Decimal(str(ticker["last"]))
+            self.last_price = price
+            self.last_update = datetime.now(timezone.utc)
+            return price
+        except Exception as e:
+            logger.warning(f"Primary price feed failed: {e}")
+            try:
+                # Try fallback provider (Kraken)
+                ticker = await self.fallback_exchange.fetch_ticker("BTC/USD")
+                price = Decimal(str(ticker["last"]))
+                self.last_price = price
+                self.last_update = datetime.now(timezone.utc)
+                logger.info("Using fallback price feed (Kraken)")
+                return price
+            except Exception as e2:
+                logger.error(f"Fallback price feed also failed: {e2}")
+                # Return last known price if both fail
+                if self.last_price > 0:
+                    logger.warning("Using stale price data")
+                    return self.last_price
+                raise RuntimeError("All price feeds failed")
+
+    async def close(self):
+        """Close exchange connections."""
+        await self.primary_exchange.close()
+        await self.fallback_exchange.close()
 class Position:
     __slots__ = ("market_id", "title", "side", "size", "entry_price",
                  "entry_btc", "entry_time")
@@ -200,7 +240,7 @@ class TradingBot:
 
         # ── Clients ───────────────────────────────────────────────────────
         self.clob_client: Optional[object] = None
-        self.binance   = ccxt.binance({"enableRateLimit": True})
+        self.price_feed = PriceFeed()
         self.tg_app: Optional[Application] = None
 
     # ─────────────────────────────────────────────────────────────────────
@@ -261,8 +301,7 @@ class TradingBot:
     async def price_feed_loop(self):
         while True:
             try:
-                ticker        = await self.binance.fetch_ticker("BTC/USDT")
-                self.btc_price = Decimal(str(ticker["last"]))
+                self.btc_price = await self.price_feed.get_btc_price()
             except Exception as e:
                 self.log(f"Price feed error: {e}")
             await asyncio.sleep(1)
@@ -941,13 +980,16 @@ class TradingBot:
 # ─────────────────────────────────────────────────────────────────────────────
 async def main():
     bot = TradingBot()
-    await bot.init_polymarket()
-    await asyncio.gather(
-        bot.start_telegram(),
-        bot.price_feed_loop(),
-        bot.market_discovery_loop(),
-        bot.trading_loop(),
-    )
+    try:
+        await bot.init_polymarket()
+        await asyncio.gather(
+            bot.start_telegram(),
+            bot.price_feed_loop(),
+            bot.market_discovery_loop(),
+            bot.trading_loop(),
+        )
+    finally:
+        await bot.price_feed.close()
 
 if __name__ == "__main__":
     try:
