@@ -22,77 +22,77 @@
 // ============================================================================
 
 export const colors = {
-  // Brand Colors
-  primary: '#7C3AED',      // Violet
-  primaryDark: '#6D28D9',
-  primaryLight: '#8B5CF6',
-  primaryTint: '#EDE9FE',
+  // Brand Colors - High Contrast Fitness Style
+  primary: '#CCFF00',      // Neon Lime
+  primaryDark: '#A3CC00',
+  primaryLight: '#D6FF33',
+  primaryTint: '#F2FFCC',
 
-  secondary: '#64748B',
-  secondaryDark: '#475569',
-  secondaryLight: '#94A3B8',
-  secondaryTint: '#F1F5F9',
+  secondary: '#1A1A1A',    // Deep Charcoal
+  secondaryDark: '#0D0D0D',
+  secondaryLight: '#262626',
+  secondaryTint: '#333333',
 
-  accent: '#EC4899',       // Pink
-  accentDark: '#DB2777',
-  accentLight: '#F472B6',
-  accentTint: '#FCE7F3',
+  accent: '#FF3366',       // Hot Pink
+  accentDark: '#E62E5C',
+  accentLight: '#FF5C85',
+  accentTint: '#FFEBEE',
 
   // Background Colors
-  background: '#FFFFFF',
-  backgroundSecondary: '#F8FAFC',
-  backgroundTertiary: '#F1F5F9',
+  background: '#000000',
+  backgroundSecondary: '#080808',
+  backgroundTertiary: '#121212',
 
-  // Dark Mode Backgrounds
-  backgroundDark: '#0B0A0F',
-  backgroundDarkSecondary: '#16141D',
-  backgroundDarkTertiary: '#211E2E',
+  // Dark Mode Backgrounds (Same as background for high contrast)
+  backgroundDark: '#000000',
+  backgroundDarkSecondary: '#080808',
+  backgroundDarkTertiary: '#121212',
 
   // Text Colors
-  text: '#1E293B',
-  textSecondary: '#64748B',
-  textTertiary: '#94A3B8',
-  textDisabled: '#CBD5E1',
+  text: '#FFFFFF',         // White text for high contrast
+  textSecondary: '#CCCCCC',
+  textTertiary: '#999999',
+  textDisabled: '#666666',
 
-  // Dark Mode Text
-  textDark: '#F1F5F9',
-  textDarkSecondary: '#CBD5E1',
-  textDarkTertiary: '#94A3B8',
+  // Dark Mode Text (Same as text for high contrast)
+  textDark: '#FFFFFF',
+  textDarkSecondary: '#CCCCCC',
+  textDarkTertiary: '#999999',
 
   // Semantic Colors
-  success: '#10B981',
-  successDark: '#059669',
-  successLight: '#34D399',
-  successTint: '#D1FAE5',
+  success: '#00FF00',      // Bright Green
+  successDark: '#00CC00',
+  successLight: '#33FF33',
+  successTint: '#E6FFCC',
 
-  error: '#EF4444',
-  errorDark: '#DC2626',
-  errorLight: '#F87171',
-  errorTint: '#FEE2E2',
+  error: '#FF0000',        // Bright Red
+  errorDark: '#CC0000',
+  errorLight: '#FF3333',
+  errorTint: '#FFE6E6',
 
-  warning: '#F59E0B',
-  warningDark: '#D97706',
-  warningLight: '#FBBF24',
-  warningTint: '#FEF3C7',
+  warning: '#FFFF00',      // Bright Yellow
+  warningDark: '#CCCC00',
+  warningLight: '#FFFF33',
+  warningTint: '#FFFFCC',
 
-  info: '#3B82F6',
-  infoDark: '#2563EB',
-  infoLight: '#60A5FA',
-  infoTint: '#DBEAFE',
+  info: '#00FFFF',         // Bright Cyan
+  infoDark: '#00CCCC',
+  infoLight: '#33FFFF',
+  infoTint: '#CCFFFF',
 
   // Border Colors
-  border: '#E2E8F0',
-  borderDark: '#CBD5E1',
-  borderLight: '#F1F5F9',
+  border: '#333333',
+  borderDark: '#404040',
+  borderLight: '#202020',
 
-  // Dark Mode Borders
-  borderDarkMode: '#334155',
-  borderDarkModeLight: '#475569',
+  // Dark Mode Borders (Same as border for high contrast)
+  borderDarkMode: '#333333',
+  borderDarkModeLight: '#404040',
 
   // Overlay Colors
-  overlay: 'rgba(0, 0, 0, 0.5)',
-  overlayLight: 'rgba(0, 0, 0, 0.3)',
-  overlayDark: 'rgba(0, 0, 0, 0.7)',
+  overlay: 'rgba(0, 0, 0, 0.7)',
+  overlayLight: 'rgba(0, 0, 0, 0.5)',
+  overlayDark: 'rgba(0, 0, 0, 0.9)',
 
   // Special Colors
   white: '#FFFFFF',
