@@ -1,0 +1,9 @@
+py-clob-client
+python-telegram-bot --upgrade
+ccxt
+python-dotenv
+requests
+tenacity
+decimal
+asyncio
+websockets
