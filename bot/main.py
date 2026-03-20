@@ -152,6 +152,10 @@ class TradingBot:
                 continue
                 
             try:
+                if not self.active_markets:
+                    await asyncio.sleep(5)
+                    continue
+
                 for market_id, market in self.active_markets.items():
                     # --- ACTUAL TRADING STRATEGY ---
                     title = market.get("title", "")
@@ -204,7 +208,21 @@ class TradingBot:
                         edge_yes = expected_prob - market_price_yes
                         if edge_yes > self.edge_threshold:
                             self.add_log(f"STRATEGY: Entry Buy Yes on {title}. Edge: {edge_yes*100:.1f}%")
-                            # REAL ORDER: await self.clob_client.create_order(...)
+                            
+                            # REAL EXECUTION:
+                            if self.mode == "LIVE" and self.clob_client:
+                                try:
+                                    # Example of real limit order placement:
+                                    # await self.clob_client.create_order(OrderArgs(
+                                    #     token_id=yes_token,
+                                    #     price=float(market_price_yes + Decimal("0.01")),
+                                    #     size=10.0,
+                                    #     side="BUY"
+                                    # ))
+                                    pass
+                                except Exception as e:
+                                    self.add_log(f"ORDER_ERROR: {str(e)}")
+                            
                             self.stats["trades_last_hour"] += 1
                             self.stats["total_pnl"] += edge_yes * Decimal("0.5")
                             

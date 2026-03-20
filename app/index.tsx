@@ -131,6 +131,109 @@ export default function Home() {
     }
   };
 
+  // --- CONTENT RENDERING ---
+
+  const renderDashboard = () => (
+    <Animated.View entering={FadeIn.duration(400)} style={styles.tabContent}>
+      {/* TOP STATUS RING */}
+      <View style={styles.performanceSection}>
+        <View style={styles.ringContainer}>
+          <LinearGradient
+            colors={[colors.primary, '#88FF00']}
+            style={styles.mainRing}
+          >
+            <View style={styles.ringInner}>
+              <Text style={styles.ringLabel}>PROFIT</Text>
+              <Text style={styles.ringValue}>+$1.2k</Text>
+              <Text style={styles.ringSubValue}>+12.4%</Text>
+            </View>
+          </LinearGradient>
+        </View>
+        <View style={styles.ringStats}>
+          <MetricCard label="BALANCE" value="5,240" trend={4.2} icon="wallet-outline" />
+          <MetricCard label="TRADES" value="312" trend={12} icon="flash-outline" />
+        </View>
+      </View>
+
+      {/* ACTIVE STRATEGY PREVIEW */}
+      <View style={styles.sectionHeader}>
+        <Text style={styles.sectionTitle}>ACTIVE_EDGES</Text>
+        <View style={styles.liveIndicator}>
+          <View style={styles.pulseDot} />
+          <Text style={styles.liveLabel}>LIVE_SCAN</Text>
+        </View>
+      </View>
+
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.horizontalScroll}>
+        {markets.map((market: any) => (
+          <TouchableOpacity key={market.id} style={styles.strategyCard}>
+            <Text style={styles.strategyTitle} numberOfLines={1}>{market.title}</Text>
+            <View style={styles.edgeMeter}>
+              <View style={[styles.edgeProgress, { width: `${market.edge * 5}%` }]} />
+            </View>
+            <Text style={styles.edgeLabel}>{market.edge}% EDGE</Text>
+          </TouchableOpacity>
+        ))}
+      </ScrollView>
+
+      {/* MARKET FEED */}
+      <Text style={[styles.sectionTitle, { marginTop: spacing.xl }]}>MARKET_PULSE</Text>
+      <View style={styles.marketList}>
+        {markets.map((market: any) => (
+          <MarketItem key={market.id} market={market} />
+        ))}
+      </View>
+    </Animated.View>
+  );
+
+  const renderStrategy = () => (
+    <Animated.View entering={FadeIn.duration(400)} style={styles.tabContent}>
+      <Text style={styles.sectionTitle}>EXECUTION_LOGIC</Text>
+      <Card variant="outline" style={styles.logicCard}>
+        <Card.Content>
+          <View style={styles.logicRow}>
+            <Text style={styles.logicKey}>STRATEGY_ID</Text>
+            <Text style={styles.logicVal}>BAYESIAN_V2_Z_SCORE</Text>
+          </View>
+          <View style={styles.logicRow}>
+            <Text style={styles.logicKey}>MIN_EDGE</Text>
+            <Text style={styles.logicVal}>10.0%</Text>
+          </View>
+          <View style={styles.logicRow}>
+            <Text style={styles.logicKey}>VOL_PROXY (σ)</Text>
+            <Text style={styles.logicVal}>100.0 USD</Text>
+          </View>
+        </Card.Content>
+      </Card>
+
+      <Text style={[styles.sectionTitle, { marginTop: spacing.xl }]}>SIGNAL_STRENGTH</Text>
+      <View style={styles.signalGrid}>
+        {markets.map((m: any) => (
+          <View key={m.id} style={styles.signalItem}>
+            <Text style={styles.signalTitle}>{m.title}</Text>
+            <Text style={[styles.signalProb, { color: m.edge > 10 ? colors.primary : colors.textTertiary }]}>
+              {m.edge > 10 ? 'STRONG_BUY' : 'NEUTRAL'}
+            </Text>
+          </View>
+        ))}
+      </View>
+    </Animated.View>
+  );
+
+  const renderLogs = () => (
+    <Animated.View entering={FadeIn.duration(400)} style={styles.tabContent}>
+      <Text style={styles.sectionTitle}>SYSTEM_LOGS</Text>
+      <View style={styles.logList}>
+        {[1, 2, 3, 4, 5].map((i) => (
+          <View key={i} style={styles.logItem}>
+            <Text style={styles.logTime}>14:2{i}:05</Text>
+            <Text style={styles.logText}>STRATEGY: Signal detected on Market_{i} (+{8+i}% Edge)</Text>
+          </View>
+        ))}
+      </View>
+    </Animated.View>
+  );
+
   // --- ONBOARDING VIEW ---
   if (!isAuthenticated && !authLoading) {
     return (
@@ -177,57 +280,12 @@ export default function Home() {
       <Header user={user} isAuthenticated={isAuthenticated} onOpenChat={() => setIsChatOpen(true)} />
       
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollBody}>
-        {/* TOP STATUS RING */}
-        <Animated.View entering={FadeInDown.delay(200)} style={styles.performanceSection}>
-          <View style={styles.ringContainer}>
-            <LinearGradient
-              colors={[colors.primary, '#88FF00']}
-              style={styles.mainRing}
-            >
-              <View style={styles.ringInner}>
-                <Text style={styles.ringLabel}>PROFIT</Text>
-                <Text style={styles.ringValue}>+$1.2k</Text>
-                <Text style={styles.ringSubValue}>+12.4%</Text>
-              </View>
-            </LinearGradient>
-          </View>
-          <View style={styles.ringStats}>
-            <MetricCard label="BALANCE" value="5,240" trend={4.2} icon="wallet-outline" />
-            <MetricCard label="TRADES" value="312" trend={12} icon="flash-outline" />
-          </View>
-        </Animated.View>
-
-        {/* ACTIVE STRATEGY */}
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>ACTIVE STRATEGY</Text>
-          <View style={styles.liveIndicator}>
-            <View style={styles.pulseDot} />
-            <Text style={styles.liveLabel}>BAYESIAN_V2</Text>
-          </View>
-        </View>
-
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.horizontalScroll}>
-          {markets.map((market: any) => (
-            <TouchableOpacity key={market.id} style={styles.strategyCard}>
-              <Text style={styles.strategyTitle}>{market.title}</Text>
-              <View style={styles.edgeMeter}>
-                <View style={[styles.edgeProgress, { width: `${market.edge * 5}%` }]} />
-              </View>
-              <Text style={styles.edgeLabel}>{market.edge}% EDGE DETECTED</Text>
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
-
-        {/* MARKET FEED */}
-        <Text style={[styles.sectionTitle, { marginTop: spacing.xl }]}>MARKET PULSE</Text>
-        <View style={styles.marketList}>
-          {markets.map((market: any) => (
-            <MarketItem key={market.id} market={market} />
-          ))}
-        </View>
+        {activeTab === 'DASHBOARD' && renderDashboard()}
+        {activeTab === 'STRATEGY' && renderStrategy()}
+        {activeTab === 'LOGS' && renderLogs()}
       </ScrollView>
 
-      {/* BOTTOM NAV TAB */}
+      {/* BOTTOM NAVTAB */}
       <View style={styles.bottomNav}>
         {['DASHBOARD', 'STRATEGY', 'LOGS'].map((tab) => (
           <TouchableOpacity 
@@ -372,7 +430,10 @@ const styles = StyleSheet.create({
   },
   scrollBody: {
     padding: spacing.lg,
-    paddingBottom: 100,
+    paddingBottom: 150,
+  },
+  tabContent: {
+    flex: 1,
   },
   performanceSection: {
     flexDirection: 'row',
@@ -640,5 +701,66 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     textAlign: 'center',
     paddingHorizontal: 40,
+  },
+  logicCard: {
+    backgroundColor: colors.secondary,
+    borderColor: colors.borderLight,
+    marginTop: spacing.md,
+  },
+  logicRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.borderLight,
+  },
+  logicKey: {
+    ...typography.tiny,
+    color: colors.textTertiary,
+    fontWeight: '700',
+  },
+  logicVal: {
+    ...typography.tiny,
+    color: colors.primary,
+    fontWeight: '900',
+  },
+  signalGrid: {
+    gap: 12,
+  },
+  signalItem: {
+    backgroundColor: colors.secondary,
+    padding: 16,
+    borderRadius: 12,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  signalTitle: {
+    ...typography.captionBold,
+    color: colors.white,
+  },
+  signalProb: {
+    ...typography.tiny,
+    fontWeight: '900',
+  },
+  logList: {
+    gap: 8,
+  },
+  logItem: {
+    flexDirection: 'row',
+    gap: 12,
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.borderLight,
+  },
+  logTime: {
+    ...typography.tiny,
+    color: colors.textTertiary,
+    fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
+  },
+  logText: {
+    ...typography.tiny,
+    color: colors.textSecondary,
+    flex: 1,
   },
 });
