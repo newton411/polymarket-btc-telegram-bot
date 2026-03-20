@@ -1,102 +1,200 @@
 """
 RECON HFT — Polymarket 5-Min BTC Trading Bot
-Strategy: Bayesian Z-Score Edge Detection
-Controls: Telegram Bot Dashboard
+Main entry point orchestrating all components
 """
 import asyncio
-import os
 import logging
-import math
-from decimal import Decimal, ROUND_HALF_UP
+import signal
+import sys
 from datetime import datetime, timezone
-from typing import Dict, List, Optional
+from typing import List, Dict, Optional
 
-from dotenv import load_dotenv
-import requests
+from config import config
+from polymarket import PolymarketClient, MarketInfo
+from strategies import TradingStrategies
+from telegram_bot import TelegramBot
+from utils import setup_logging, validate_config, load_env_file, RateLimiter, log_opportunity, log_trade
 
-# Polymarket SDK (optional – falls back to simulation if not installed)
-try:
-    from clob_client.client import ClobClient
-    from clob_client.clob_types import OrderArgs, ApiCredential
-    from clob_client.constants import POLYGON
-except ImportError:
-    ClobClient = None
-
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import (
-    Application, CommandHandler, ContextTypes, CallbackQueryHandler
-)
-
-import ccxt.async_support as ccxt
-
-# ── Setup ─────────────────────────────────────────────────────────────────────
-logging.basicConfig(
-    format="%(asctime)s | %(levelname)s | %(message)s",
-    level=logging.INFO,
-)
+# Setup logging
+setup_logging()
 logger = logging.getLogger(__name__)
-load_dotenv()
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-#  PRICE FEED SYSTEM
-# ─────────────────────────────────────────────────────────────────────────────
-class PriceFeed:
-    """Multi-provider price feed with fallbacks."""
+class TradingBot:
+    """Main trading bot orchestrating all components."""
 
     def __init__(self):
-        self.primary_exchange = ccxt.binance({"enableRateLimit": True})
-        self.fallback_exchange = ccxt.kraken({"enableRateLimit": True})  # Fallback exchange
-        self.last_price = Decimal("0.0")
-        self.last_update = None
+        # Load and validate configuration
+        load_env_file()
+        validate_config()
 
-    async def get_btc_price(self) -> Decimal:
-        """Get BTC price with fallback providers."""
+        # Initialize components
+        self.pm_client = PolymarketClient()
+        self.price_feed = None  # Will be initialized in run()
+        self.strategies = None  # Will be initialized in run()
+        self.telegram_bot = TelegramBot(self)
+
+        # State
+        self.active_markets: List[MarketInfo] = []
+        self.is_running = False
+        self.rate_limiter = RateLimiter(calls_per_second=2.0)  # Respect API limits
+
+        # Performance tracking (simplified)
+        self.total_trades = 0
+        self.successful_trades = 0
+        self.daily_pnl = 0.0
+
+        logger.info("TradingBot initialized")
+
+    async def discover_markets(self):
+        """Discover active BTC 5-min markets."""
         try:
-            # Try primary provider (Binance)
-            ticker = await self.primary_exchange.fetch_ticker("BTC/USDT")
-            price = Decimal(str(ticker["last"]))
-            self.last_price = price
-            self.last_update = datetime.now(timezone.utc)
-            return price
+            markets = await self.pm_client.discover_btc_markets()
+            self.active_markets = markets
+            logger.info(f"Discovered {len(markets)} BTC markets")
+
+            if markets:
+                for market in markets[:3]:  # Log first 3
+                    logger.info(f"Market: {market.market_id[:8]} - {market.question[:50]}...")
+
+            return markets
         except Exception as e:
-            logger.warning(f"Primary price feed failed: {e}")
+            logger.error(f"Market discovery failed: {e}")
+            return []
+
+    async def trading_loop(self):
+        """Main trading loop."""
+        logger.info("Starting trading loop")
+
+        while self.is_running:
             try:
-                # Try fallback provider (Kraken)
-                ticker = await self.fallback_exchange.fetch_ticker("BTC/USD")
-                price = Decimal(str(ticker["last"]))
-                self.last_price = price
-                self.last_update = datetime.now(timezone.utc)
-                logger.info("Using fallback price feed (Kraken)")
-                return price
-            except Exception as e2:
-                logger.error(f"Fallback price feed also failed: {e2}")
-                # Return last known price if both fail
-                if self.last_price > 0:
-                    logger.warning("Using stale price data")
-                    return self.last_price
-                raise RuntimeError("All price feeds failed")
+                # Respect rate limits
+                await self.rate_limiter.wait_if_needed()
 
-    async def close(self):
-        """Close exchange connections."""
-        await self.primary_exchange.close()
-        await self.fallback_exchange.close()
-class Position:
-    __slots__ = ("market_id", "title", "side", "size", "entry_price",
-                 "entry_btc", "entry_time")
+                # Discover markets periodically
+                if not self.active_markets or len(self.active_markets) == 0:
+                    await self.discover_markets()
+                    await asyncio.sleep(60)  # Wait before next discovery
+                    continue
 
-    def __init__(self, market_id, title, side, size, entry_price, entry_btc):
-        self.market_id   = market_id
-        self.title       = title
-        self.side        = side
-        self.size        = size
-        self.entry_price = entry_price
-        self.entry_btc   = entry_btc
-        self.entry_time  = datetime.now(timezone.utc)
+                # Process each active market
+                for market in self.active_markets[:5]:  # Limit to first 5 markets
+                    if not self.is_running:
+                        break
 
+                    try:
+                        # Get order book
+                        orderbook = await self.pm_client.get_orderbook(market.market_id)
+                        if not orderbook:
+                            continue
 
-class PerformanceTracker:
-    """Tracks cumulative performance metrics in real-time."""
+                        # Check all strategies
+                        opportunities = []
+
+                        # Arbitrage (highest priority)
+                        arb_opp = await self.strategies.check_arbitrage(market.market_id, orderbook)
+                        if arb_opp:
+                            opportunities.append(arb_opp)
+
+                        # Sniping
+                        snipe_opp = await self.strategies.check_snipe(market.market_id, orderbook)
+                        if snipe_opp:
+                            opportunities.append(snipe_opp)
+
+                        # Momentum
+                        mom_opp = await self.strategies.check_momentum(market.market_id, orderbook)
+                        if mom_opp:
+                            opportunities.append(mom_opp)
+
+                        # Market Making (lowest priority)
+                        mm_opp = await self.strategies.check_market_making(market.market_id, orderbook)
+                        if mm_opp:
+                            opportunities.append(mm_opp)
+
+                        # Execute best opportunity (prioritize arbitrage)
+                        for opp in opportunities:
+                            if not self.telegram_bot.is_paused:
+                                log_opportunity(opp)
+                                success = await self.strategies.execute_opportunity(opp)
+                                log_trade(opp, success)
+
+                                if success:
+                                    self.total_trades += 1
+                                    if opp['type'] == 'arbitrage':  # Arbitrage should always profit
+                                        self.successful_trades += 1
+
+                                # Small delay between trades
+                                await asyncio.sleep(0.5)
+                                break  # Only execute one opportunity per market per cycle
+
+                    except Exception as e:
+                        logger.error(f"Error processing market {market.market_id}: {e}")
+
+                # Wait before next cycle
+                await asyncio.sleep(config.POLL_INTERVAL)
+
+            except Exception as e:
+                logger.error(f"Trading loop error: {e}")
+                await asyncio.sleep(5)  # Brief pause on error
+
+    async def run(self):
+        """Main run method."""
+        logger.info("Starting RECON HFT Trading Bot")
+        logger.warning("⚠️  DRY RUN MODE - No real orders will be placed" if config.DRY_RUN else "🔴 LIVE TRADING MODE - Real orders will be placed")
+
+        # Initialize price feed
+        from price_feed import PriceFeed  # Import here to avoid circular imports
+        self.price_feed = PriceFeed()
+        self.strategies = TradingStrategies(self.pm_client, self.price_feed)
+
+        # Setup signal handlers for graceful shutdown
+        def signal_handler(signum, frame):
+            logger.info("Shutdown signal received")
+            self.is_running = False
+
+        signal.signal(signal.SIGINT, signal_handler)
+        signal.signal(signal.SIGTERM, signal_handler)
+
+        self.is_running = True
+
+        try:
+            # Start all components
+            await asyncio.gather(
+                self.telegram_bot.start_bot(),
+                self.trading_loop(),
+                self._dashboard_update_loop()
+            )
+
+        except Exception as e:
+            logger.error(f"Bot runtime error: {e}")
+        finally:
+            logger.info("Shutting down bot...")
+            await self.telegram_bot.stop_bot()
+            await self.price_feed.close()
+            logger.info("Bot shutdown complete")
+
+    async def _dashboard_update_loop(self):
+        """Update Telegram dashboard periodically."""
+        while self.is_running:
+            try:
+                await self.telegram_bot.update_dashboard()
+                await asyncio.sleep(config.DASHBOARD_UPDATE_INTERVAL)
+            except Exception as e:
+                logger.error(f"Dashboard update error: {e}")
+                await asyncio.sleep(5)
+
+async def main():
+    """Entry point."""
+    bot = TradingBot()
+    await bot.run()
+
+if __name__ == "__main__":
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        logger.info("Bot stopped by user")
+    except Exception as e:
+        logger.error(f"Fatal error: {e}")
+        sys.exit(1)
 
     def __init__(self, initial_balance: Decimal):
         self.initial_balance = initial_balance
