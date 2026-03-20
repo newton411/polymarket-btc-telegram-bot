@@ -33,6 +33,7 @@ import Animated, {
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 
 import { useAuth } from '@/hooks/useAuth';
+import { Platform as RNPlatform } from 'react-native';
 import { blink } from '@/lib/blink';
 import { colors, spacing, typography, borderRadius, shadows } from '@/constants/design';
 
@@ -198,13 +199,31 @@ const navStyles = StyleSheet.create({
 // ─────────────────────────────────────────────
 //  ONBOARDING SCREEN
 // ─────────────────────────────────────────────
-function OnboardingScreen({ onLogin, loading }: { onLogin: () => void; loading: boolean }) {
+function OnboardingScreen({
+  onGoogleLogin,
+  onEmailLogin,
+  onEmailSignup,
+  loading,
+  authError,
+}: {
+  onGoogleLogin: () => void;
+  onEmailLogin: (e: string, p: string) => void;
+  onEmailSignup: (e: string, p: string) => void;
+  loading: boolean;
+  authError: string | null;
+}) {
   const STEPS = [
     { icon: 'flash-circle', title: 'RECON HFT', sub: 'Bayesian edge detection\nfor 5-minute BTC markets.' },
     { icon: 'trending-up', title: 'PRECISION\nEXECUTION', sub: 'Z-Score based limit orders\nautomatically placed at optimal price.' },
     { icon: 'shield-check', title: 'RISK\nCONTROLLED', sub: 'Kelly sizing, delta hedging\nand drawdown protection built-in.' },
   ];
   const [step, setStep] = useState(0);
+  const [authMode, setAuthMode] = useState<'options' | 'email'>('options');
+  const [emailSignup, setEmailSignup] = useState(false);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [emailFocused, setEmailFocused] = useState(false);
+  const [passFocused, setPassFocused] = useState(false);
   const current = STEPS[step];
   const isLast = step === STEPS.length - 1;
 
@@ -218,20 +237,45 @@ function OnboardingScreen({ onLogin, loading }: { onLogin: () => void; loading: 
           <Text style={ob.skipText}>Skip →</Text>
         </TouchableOpacity>
       )}
+      {isLast && authMode === 'email' && (
+        <TouchableOpacity style={ob.skip} onPress={() => setAuthMode('options')}>
+          <Text style={ob.skipText}>← Back</Text>
+        </TouchableOpacity>
+      )}
 
       {/* Content */}
-      <Animated.View key={step} entering={FadeInUp.duration(400)} style={ob.content}>
-        <MaterialCommunityIcons name={current.icon as any} size={90} color={colors.primary} />
-        <Text style={ob.title}>{current.title}</Text>
-        <Text style={ob.sub}>{current.sub}</Text>
+      <Animated.View key={`${step}-${authMode}`} entering={FadeInUp.duration(350)} style={ob.content}>
+        {authMode === 'options' ? (
+          <>
+            <MaterialCommunityIcons name={current.icon as any} size={90} color={colors.primary} />
+            <Text style={ob.title}>{current.title}</Text>
+            <Text style={ob.sub}>{current.sub}</Text>
+          </>
+        ) : (
+          <>
+            <MaterialCommunityIcons name="lock-outline" size={60} color={colors.primary} />
+            <Text style={ob.title}>{emailSignup ? 'CREATE\nACCOUNT' : 'WELCOME\nBACK'}</Text>
+            <Text style={ob.sub}>Enter your credentials to access RECON.</Text>
+          </>
+        )}
       </Animated.View>
 
-      {/* Step dots */}
-      <View style={ob.dotsRow}>
-        {STEPS.map((_, i) => (
-          <View key={i} style={[ob.dot, i === step && ob.dotActive]} />
-        ))}
-      </View>
+      {/* Step dots (only on step screens) */}
+      {authMode === 'options' && (
+        <View style={ob.dotsRow}>
+          {STEPS.map((_, i) => (
+            <View key={i} style={[ob.dot, i === step && ob.dotActive]} />
+          ))}
+        </View>
+      )}
+
+      {/* Error banner */}
+      {authError ? (
+        <View style={ob.errorBanner}>
+          <Ionicons name="alert-circle" size={14} color={colors.error} />
+          <Text style={ob.errorText} numberOfLines={2}>{authError.replace('Error: ', '')}</Text>
+        </View>
+      ) : <View style={{ height: 40 }} />}
 
       {/* Actions */}
       <Animated.View entering={FadeInDown.delay(300)} style={ob.actions}>
@@ -239,17 +283,71 @@ function OnboardingScreen({ onLogin, loading }: { onLogin: () => void; loading: 
           <TouchableOpacity style={ob.btn} onPress={() => setStep((s) => s + 1)}>
             <Text style={ob.btnText}>NEXT →</Text>
           </TouchableOpacity>
-        ) : (
+        ) : authMode === 'options' ? (
           <>
-            <TouchableOpacity style={ob.btn} onPress={onLogin} disabled={loading}>
+            <TouchableOpacity style={ob.btn} onPress={onGoogleLogin} disabled={loading}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
                 <Ionicons name="logo-google" size={20} color="#000" />
                 <Text style={ob.btnText}>{loading ? 'CONNECTING…' : 'SIGN IN WITH GOOGLE'}</Text>
               </View>
             </TouchableOpacity>
+            <TouchableOpacity style={ob.secondaryBtn} onPress={() => setAuthMode('email')}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                <Ionicons name="mail-outline" size={18} color={colors.primary} />
+                <Text style={ob.secondaryBtnText}>CONTINUE WITH EMAIL</Text>
+              </View>
+            </TouchableOpacity>
             <Text style={ob.disclaimer}>
-              Trading prediction markets is high risk. Only use capital you can afford to lose.
+              Trading prediction markets is high risk.\nOnly use capital you can afford to lose.
             </Text>
+          </>
+        ) : (
+          <>
+            {/* Email input */}
+            <View style={[ob.inputWrap, emailFocused && ob.inputFocused]}>
+              <Ionicons name="mail-outline" size={16} color={emailFocused ? colors.primary : '#444'} />
+              <TextInput
+                style={ob.input}
+                placeholder="Email address"
+                placeholderTextColor="#444"
+                value={email}
+                onChangeText={setEmail}
+                onFocus={() => setEmailFocused(true)}
+                onBlur={() => setEmailFocused(false)}
+                keyboardType="email-address"
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+            </View>
+            {/* Password input */}
+            <View style={[ob.inputWrap, passFocused && ob.inputFocused]}>
+              <Ionicons name="lock-closed-outline" size={16} color={passFocused ? colors.primary : '#444'} />
+              <TextInput
+                style={ob.input}
+                placeholder="Password"
+                placeholderTextColor="#444"
+                value={password}
+                onChangeText={setPassword}
+                onFocus={() => setPassFocused(true)}
+                onBlur={() => setPassFocused(false)}
+                secureTextEntry
+                autoCapitalize="none"
+              />
+            </View>
+            <TouchableOpacity
+              style={[ob.btn, (!email.trim() || !password.trim() || loading) && { opacity: 0.55 }]}
+              disabled={!email.trim() || !password.trim() || loading}
+              onPress={() => emailSignup ? onEmailSignup(email, password) : onEmailLogin(email, password)}
+            >
+              <Text style={ob.btnText}>
+                {loading ? 'CONNECTING…' : emailSignup ? 'CREATE ACCOUNT' : 'SIGN IN'}
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={ob.toggleMode} onPress={() => setEmailSignup((v) => !v)}>
+              <Text style={ob.toggleText}>
+                {emailSignup ? 'Already have an account? Sign in' : "Don't have an account? Sign up"}
+              </Text>
+            </TouchableOpacity>
           </>
         )}
       </Animated.View>
@@ -258,18 +356,27 @@ function OnboardingScreen({ onLogin, loading }: { onLogin: () => void; loading: 
 }
 const ob = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#000', justifyContent: 'space-between', paddingHorizontal: 28, paddingTop: 80, paddingBottom: 50 },
-  skip: { position: 'absolute', top: 56, right: 28 },
+  skip: { position: 'absolute', top: 56, right: 28, zIndex: 10 },
   skipText: { fontSize: 13, color: '#555', fontWeight: '700' },
   content: { flex: 1, alignItems: 'flex-start', justifyContent: 'center', gap: 20 },
   title: { fontSize: 48, fontWeight: '900', color: colors.primary, lineHeight: 52, letterSpacing: -1 },
   sub: { fontSize: 16, color: '#888', lineHeight: 24, maxWidth: W * 0.75 },
-  dotsRow: { flexDirection: 'row', gap: 8, marginBottom: 32 },
+  dotsRow: { flexDirection: 'row', gap: 8, marginBottom: 8 },
   dot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#222' },
   dotActive: { backgroundColor: colors.primary, width: 20 },
-  actions: { gap: 16 },
+  actions: { gap: 14 },
   btn: { backgroundColor: colors.primary, height: 58, borderRadius: 0, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 24 },
   btnText: { fontSize: 15, fontWeight: '900', color: '#000', letterSpacing: 1.5 },
+  secondaryBtn: { height: 52, borderRadius: 0, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: 'rgba(204,255,0,0.4)' },
+  secondaryBtnText: { fontSize: 13, fontWeight: '800', color: colors.primary, letterSpacing: 1 },
   disclaimer: { fontSize: 11, color: '#444', textAlign: 'center', lineHeight: 16 },
+  errorBanner: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: 'rgba(255,0,0,0.08)', borderRadius: 10, paddingHorizontal: 14, paddingVertical: 10, borderWidth: 1, borderColor: 'rgba(255,0,0,0.25)', marginBottom: 4 },
+  errorText: { flex: 1, fontSize: 12, color: colors.error, lineHeight: 16 },
+  inputWrap: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#0d0d0d', borderRadius: 0, paddingHorizontal: 16, paddingVertical: 14, gap: 12, borderWidth: 1, borderColor: '#222' },
+  inputFocused: { borderColor: colors.primary },
+  input: { flex: 1, fontSize: 14, color: '#fff', height: 22 },
+  toggleMode: { alignItems: 'center', paddingVertical: 6 },
+  toggleText: { fontSize: 12, color: '#555', fontWeight: '600' },
 });
 
 // ─────────────────────────────────────────────
@@ -640,7 +747,16 @@ const logStyles = StyleSheet.create({
 //  ROOT SCREEN
 // ─────────────────────────────────────────────
 export default function Home() {
-  const { user, isLoading: authLoading, isAuthenticated, signInWithGoogle, signOut } = useAuth();
+  const {
+    user,
+    isLoading: authLoading,
+    isAuthenticated,
+    authError,
+    signInWithGoogle,
+    signInWithEmail,
+    signUpWithEmail,
+    signOut,
+  } = useAuth();
   const [activeTab, setActiveTab] = useState<TabId>('DASHBOARD');
   const [loginLoading, setLoginLoading] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
@@ -654,16 +770,38 @@ export default function Home() {
     refetchInterval: 8000,
   });
 
-  const handleLogin = useCallback(async () => {
+  const handleGoogleLogin = useCallback(async () => {
     setLoginLoading(true);
     try {
       await signInWithGoogle();
     } catch {
-      // error already logged inside hook
+      // authError state is set in hook
     } finally {
       setLoginLoading(false);
     }
   }, [signInWithGoogle]);
+
+  const handleEmailLogin = useCallback(async (email: string, password: string) => {
+    setLoginLoading(true);
+    try {
+      await signInWithEmail(email, password);
+    } catch {
+      // authError state is set in hook
+    } finally {
+      setLoginLoading(false);
+    }
+  }, [signInWithEmail]);
+
+  const handleEmailSignup = useCallback(async (email: string, password: string) => {
+    setLoginLoading(true);
+    try {
+      await signUpWithEmail(email, password);
+    } catch {
+      // authError state is set in hook
+    } finally {
+      setLoginLoading(false);
+    }
+  }, [signUpWithEmail]);
 
   // While checking auth, show blank dark screen (no flash)
   if (authLoading) {
@@ -672,7 +810,15 @@ export default function Home() {
 
   // Not signed in → onboarding
   if (!isAuthenticated) {
-    return <OnboardingScreen onLogin={handleLogin} loading={loginLoading} />;
+    return (
+      <OnboardingScreen
+        onGoogleLogin={handleGoogleLogin}
+        onEmailLogin={handleEmailLogin}
+        onEmailSignup={handleEmailSignup}
+        loading={loginLoading}
+        authError={authError}
+      />
+    );
   }
 
   // Signed in → main app
