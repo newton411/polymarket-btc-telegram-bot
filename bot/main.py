@@ -59,6 +59,7 @@ class TradingBot:
             "last_logs": []
         }
         self.active_markets = {}  # { market_id: market_info }
+        self.active_positions = {} # { market_id: position_info }
         self.btc_price = Decimal("0.0")
         self.dashboard_message_id = None
         self.last_dashboard_update = 0
@@ -66,6 +67,7 @@ class TradingBot:
         # Clients
         self.clob_client = None
         self.binance = ccxt.binance()
+        self.tg_app = None # To be set after start_telegram
         
     def add_log(self, message: str):
         timestamp = datetime.now().strftime("%H:%M:%S")
@@ -74,6 +76,24 @@ class TradingBot:
         if len(self.stats["last_logs"]) > 5:
             self.stats["last_logs"].pop(0)
         logger.info(message)
+
+    async def send_telegram_alert(self, message: str):
+        if not self.telegram_token or not self.allowed_user_id or not self.tg_app:
+            return
+        
+        try:
+            # Escape markdown for Telegram
+            escaped_msg = message
+            # For simplicity, we assume the input might already be partly markdown
+            # but we need to be careful with dots and dashes in MarkdownV2
+            
+            await self.tg_app.bot.send_message(
+                chat_id=self.allowed_user_id,
+                text=escaped_msg,
+                parse_mode="MarkdownV2"
+            )
+        except Exception as e:
+            logger.error(f"Failed to send Telegram alert: {str(e)}")
 
     async def init_polymarket(self):
         try:
@@ -279,42 +299,55 @@ class TradingBot:
         mode = "🛑 LIVE" if self.mode == "LIVE" else "🧪 DRY-RUN"
         
         text = f"""
-🤖 *Polymarket BTC Dashboard* \| {status}
-🔥 *Mode:* {mode} \| 💰 *USDC:* `{self.stats['balance']}`
-📈 *BTC Price:* `{self.btc_price}`
+🤖 *RECON HFT Dashboard* \| {status}
+🔥 *Mode:* {mode} \| 💰 *USDC:* `{self.stats['balance']:.2f}`
+📈 *BTC Price:* `${self.btc_price:.2f}`
 
 📊 *Performance (24h)*
 ├─ ⚡ *Trades:* `{self.stats['trades_last_hour']}`
-├─ 🎯 *Win Rate:* `{self.stats['win_rate']}%`
-├─ 📉 *Total P&L:* `{self.stats['total_pnl']}`
-└─ 🧱 *Net Delta:* `{self.stats['net_delta']}`
+├─ 🎯 *Win Rate:* `{self.stats['win_rate']:.1f}%`
+├─ 📉 *Total P&L:* `{self.stats['total_pnl']:.4f}`
+└─ 🧱 *Positions:* `{self.stats['positions_count']}`
 
+💼 *Active Positions*
+"""
+        # Add active positions detail
+        if not self.active_positions:
+            text += "└─ _None_\n"
+        else:
+            for m_id, pos in list(self.active_positions.items())[:3]:
+                text += f"├─ `{pos['side']}` on `{pos['title'][:15]}...` @ `${pos['entry_price']:.2f}`\n"
+            if len(self.active_positions) > 3:
+                text += f"└─ _+ {len(self.active_positions) - 3} more_\n"
+
+        text += f"""
 📋 *Latest Activity*
 ```
 {chr(10).join(self.stats['last_logs'])}
 ```
 """
-        # Escape markdown special characters
+        # Escape markdown special characters carefully
         for char in ['-', '.', '!', '+', '(', ')']:
             text = text.replace(char, f"\\{char}")
         return text
 
     async def start_telegram(self):
-        app = Application.builder().token(self.telegram_token).build()
+        self.tg_app = Application.builder().token(self.telegram_token).build()
         
         # Commands
-        app.add_handler(CommandHandler("start", self.cmd_start))
-        app.add_handler(CommandHandler("status", self.cmd_status))
-        app.add_handler(CommandHandler("pause", self.cmd_pause))
-        app.add_handler(CommandHandler("resume", self.cmd_resume))
-        app.add_handler(CommandHandler("setthreshold", self.cmd_set_threshold))
+        self.tg_app.add_handler(CommandHandler("start", self.cmd_start))
+        self.tg_app.add_handler(CommandHandler("status", self.cmd_status))
+        self.tg_app.add_handler(CommandHandler("pause", self.cmd_pause))
+        self.tg_app.add_handler(CommandHandler("resume", self.cmd_resume))
+        self.tg_app.add_handler(CommandHandler("setthreshold", self.cmd_set_threshold))
+        self.tg_app.add_handler(CommandHandler("backtest", self.cmd_backtest))
         
         # Callbacks
-        app.add_handler(CallbackQueryHandler(self.handle_callbacks))
+        self.tg_app.add_handler(CallbackQueryHandler(self.handle_callbacks))
         
-        await app.initialize()
-        await app.start()
-        await app.updater.start_polling()
+        await self.tg_app.initialize()
+        await self.tg_app.start()
+        await self.tg_app.updater.start_polling()
         self.add_log("Telegram Bot started.")
 
     async def cmd_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -377,6 +410,33 @@ class TradingBot:
             await update.message.reply_text(f"✅ Edge threshold set to: {new_val}")
         except:
             await update.message.reply_text("❌ Usage: /setthreshold <decimal>")
+
+    async def cmd_backtest(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if update.effective_user.id != self.allowed_user_id:
+            return
+        
+        await update.message.reply_text("⏳ Running backtest over last 1000m... Please wait.")
+        
+        # Run backtest logic (simplified for now by calling the module)
+        try:
+            # We can import and run the Backtester here
+            from bot.backtest import Backtester
+            backtester = Backtester(limit=1000)
+            await backtester.run()
+            
+            res = f"""
+📊 *Backtest Results (1000m)*
+├─ 💰 *Total P&L:* `${backtester.total_pnl:.2f}`
+├─ 📈 *ROI:* `{(backtester.total_pnl / backtester.initial_balance * 100):.2f}%`
+├─ ⚡ *Trades:* `{backtester.trades_count}`
+└─ 🎯 *Win Rate:* `{(backtester.wins / backtester.trades_count * 100 if backtester.trades_count > 0 else 0):.1f}%`
+"""
+            # Escape
+            for char in ['-', '.', '!', '+', '(', ')']:
+                res = res.replace(char, f"\\{char}")
+            await update.message.reply_text(res, parse_mode="MarkdownV2")
+        except Exception as e:
+            await update.message.reply_text(f"❌ Backtest failed: {str(e)}")
 
     async def handle_callbacks(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query

@@ -4,9 +4,18 @@ A high-frequency trading bot for Polymarket 5-minute Bitcoin markets with a Tele
 
 ## Features
 - **HFT Trading Engine**: Targets 5-minute BTC markets using limit orders.
-- **Simplified Bayesian Edge**: Models the probability of resolution based on BTC spot price (Binance).
-- **Telegram Live Dashboard**: Monitor stats, P&L, and control the bot from Telegram.
+- **Stop-Loss & Take-Profit**: Automated risk management based on probability shifts.
+- **Backtesting Module**: Test strategies on historical data with the `/backtest` command.
+- **Bayesian Edge**: Models resolution probability based on BTC spot price (Binance).
+- **Telegram Dashboard**: Monitor stats, P&L, active positions, and logs.
 - **Dry Run Mode**: Test strategies without risking capital.
+
+## Commands
+- `/start`: Open the live dashboard.
+- `/status`: Get system health and portfolio summary.
+- `/backtest`: Run a performance simulation over historical data.
+- `/pause` / `/resume`: Control the trading engine.
+- `/setthreshold`: Adjust minimum edge required for trades.
 
 ## Setup
 
