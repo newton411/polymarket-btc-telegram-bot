@@ -4,3 +4,15 @@
 
 expo-env.d.ts
 # @end expo-cli
+node_modules
+
+node_modules
+.env
+.env.local
+__pycache__/
+*.pyc
+dist/
+.expo/
+.vscode/
+package-lock.json
+eslint.config.js

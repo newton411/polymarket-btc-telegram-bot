@@ -36,7 +36,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 
 import { useAuth } from '@/hooks/useAuth';
 import { blink } from '@/lib/blink';
-import { colors, spacing, typography, borderRadius } from '@/constants/design';
+import { colors } from '@/constants/design';
 
 const { width: W } = Dimensions.get('window');
 
@@ -63,7 +63,7 @@ function PulseDot({ color = colors.primary }: { color?: string }) {
       withSequence(withTiming(1.7, { duration: 800 }), withTiming(1, { duration: 800 })),
       -1, true
     );
-  }, []);
+  }, [scale]);
   const style = useAnimatedStyle(() => ({
     transform: [{ scale: scale.value }],
     opacity: interpolate(scale.value, [1, 1.7], [1, 0.2]),
@@ -802,6 +802,13 @@ export default function Home() {
             <Ionicons name="paper-plane-outline" size={18} color={colors.primary} />
             <Text style={app.profileRowText}>Open Telegram Bot</Text>
           </TouchableOpacity>
+
+          <Link href="/strategies" asChild>
+            <TouchableOpacity style={app.profileRow} onPress={() => setProfileOpen(false)}>
+              <Ionicons name="settings-outline" size={18} color={colors.primary} />
+              <Text style={app.profileRowText}>Bot Strategies</Text>
+            </TouchableOpacity>
+          </Link>
 
           <TouchableOpacity style={[app.profileRow, { borderColor: '#1a1a1a' }]} onPress={() => { signOut(); setProfileOpen(false); }}>
             <Ionicons name="log-out-outline" size={18} color={colors.error} />

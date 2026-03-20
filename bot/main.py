@@ -167,6 +167,20 @@ class TradingBot:
         self.take_profit_pct  = Decimal(os.getenv("TAKE_PROFIT_PCT", "0.15"))
         self.pnl_alert_threshold = Decimal(os.getenv("PNL_ALERT_THRESHOLD", "5.0"))  # USDC
 
+        # Strategy toggles
+        self.enable_arbitrage = os.getenv("ENABLE_ARBITRAGE", "true").lower() == "true"
+        self.enable_oracle_snipe = os.getenv("ENABLE_ORACLE_SNIPE", "true").lower() == "true"
+        self.enable_momentum = os.getenv("ENABLE_MOMENTUM", "true").lower() == "true"
+        self.enable_cross_market = os.getenv("ENABLE_CROSS_MARKET", "false").lower() == "true"
+        self.enable_asymmetric = os.getenv("ENABLE_ASYMMETRIC", "true").lower() == "true"
+
+        # Strategy parameters
+        self.arb_sum_target = Decimal(os.getenv("ARB_SUM_TARGET", "0.96"))
+        self.oracle_snipe_window = int(os.getenv("ORACLE_SNIPE_WINDOW", "30"))  # seconds
+        self.momentum_threshold = Decimal(os.getenv("MOMENTUM_THRESHOLD", "0.08"))
+        self.cross_market_threshold = Decimal(os.getenv("CROSS_MARKET_THRESHOLD", "0.05"))
+        self.asymmetric_edge_threshold = Decimal(os.getenv("ASYMMETRIC_EDGE_THRESHOLD", "0.08"))
+
         self.telegram_token   = os.getenv("TELEGRAM_BOT_TOKEN")
         self.allowed_user_id  = int(os.getenv("TELEGRAM_ALLOWED_USER_ID", "0"))
 
@@ -283,12 +297,24 @@ class TradingBot:
             try:
                 if self.active_markets:
                     await self._manage_positions()
-                    await self._scan_entries()
+                    await self._run_strategies()
             except Exception as e:
                 self.log(f"Trading loop error: {e}")
-            await asyncio.sleep(3)
+            await asyncio.sleep(1)  # Faster polling for strategies
 
-    async def _scan_entries(self):
+    async def _run_strategies(self):
+        """Run all enabled trading strategies."""
+        for mid, market in self.active_markets.items():
+            if self.enable_arbitrage:
+                await self._arbitrage_strategy(mid, market)
+            if self.enable_oracle_snipe:
+                await self._oracle_snipe_strategy(mid, market)
+            if self.enable_momentum:
+                await self._momentum_strategy(mid, market)
+            if self.enable_cross_market:
+                await self._cross_market_strategy(mid, market)
+            if self.enable_asymmetric:
+                await self._asymmetric_strategy(mid, market)
         for mid, market in self.active_markets.items():
             if mid in self.active_positions:
                 continue
@@ -392,6 +418,173 @@ class TradingBot:
         for mid in to_close:
             self.active_positions.pop(mid, None)
 
+    # ─────────────────────────────────────────────────────────────────────
+    #  TRADING STRATEGIES
+    # ─────────────────────────────────────────────────────────────────────
+    async def _arbitrage_strategy(self, mid: str, market: dict):
+        """Risk-free arbitrage: Buy both sides if sum < target."""
+        if mid in self.active_positions:
+            return
+        try:
+            tokens = market.get("tokens", [])
+            if len(tokens) < 2:
+                return
+            yes_token = next((t for t in tokens if t.get("outcome") == "Yes"), None)
+            no_token = next((t for t in tokens if t.get("outcome") == "No"), None)
+            if not yes_token or not no_token:
+                return
+
+            yes_price = Decimal(str(yes_token.get("price", 0)))
+            no_price = Decimal(str(no_token.get("price", 0)))
+            total_cost = yes_price + no_price
+
+            if total_cost <= self.arb_sum_target:
+                edge = (Decimal("1.0") - total_cost) / Decimal("2.0")  # Split edge
+                await self._open_position(mid, market.get("title", ""), "ARB_YES", yes_price, Decimal("0.5"))
+                await self._open_position(mid, market.get("title", ""), "ARB_NO", no_price, Decimal("0.5"))
+                self.log(f"ARB OPEN | {market.get('title', '')[:30]} | Total Cost {float(total_cost):.3f}")
+        except Exception as e:
+            logger.debug(f"Arbitrage error {mid}: {e}")
+
+    async def _oracle_snipe_strategy(self, mid: str, market: dict):
+        """Last-second sniping based on oracle latency."""
+        if mid in self.active_positions:
+            return
+        try:
+            exp_str = market.get("expires_at", "")
+            if not exp_str:
+                return
+            exp_dt = datetime.fromisoformat(exp_str.replace("Z", "+00:00"))
+            time_left = (exp_dt - datetime.now(timezone.utc)).total_seconds()
+
+            if time_left > self.oracle_snipe_window:
+                return  # Too early
+
+            title = market.get("title", "")
+            strike_str = title.split("$")[1].split(" ")[0].replace(",", "")
+            strike = Decimal(strike_str)
+
+            # Simple momentum: if BTC moved significantly towards strike
+            prob_up = self._prob(self.btc_price, strike, time_left)
+            implied_prob = prob_up if self.btc_price > strike else (1 - prob_up)
+
+            if implied_prob > Decimal("0.6"):  # Strong signal
+                side = "YES" if self.btc_price > strike else "NO"
+                price = prob_up if side == "YES" else (1 - prob_up)
+                if price < Decimal("0.5"):  # Cheap
+                    await self._open_position(mid, title, side, price, implied_prob)
+                    self.log(f"ORACLE SNIPE | {title[:30]} | Side {side} | Prob {float(implied_prob)*100:.1f}%")
+        except Exception as e:
+            logger.debug(f"Oracle snipe error {mid}: {e}")
+
+    async def _momentum_strategy(self, mid: str, market: dict):
+        """Statistical momentum edge."""
+        if mid in self.active_positions:
+            return
+        try:
+            title = market.get("title", "")
+            tokens = market.get("tokens", [])
+            if len(tokens) < 2:
+                return
+            strike_str = title.split("$")[1].split(" ")[0].replace(",", "")
+            strike = Decimal(strike_str)
+            exp_str = market.get("expires_at", "")
+            if not exp_str:
+                return
+            exp_dt = datetime.fromisoformat(exp_str.replace("Z", "+00:00"))
+            time_left = (exp_dt - datetime.now(timezone.utc)).total_seconds()
+
+            prob_y = self._prob(self.btc_price, strike, time_left)
+            price_yes = prob_y - Decimal("0.02")
+            price_no = (1 - prob_y) - Decimal("0.02")
+
+            if (prob_y - price_yes) >= self.momentum_threshold:
+                await self._open_position(mid, title, "YES", price_yes, prob_y)
+            elif ((1 - prob_y) - price_no) >= self.momentum_threshold:
+                await self._open_position(mid, title, "NO", price_no, 1 - prob_y)
+        except Exception as e:
+            logger.debug(f"Momentum error {mid}: {e}")
+
+    async def _cross_market_strategy(self, mid: str, market: dict):
+        """Cross-market correlation arbitrage."""
+        # Simplified: Compare with other active markets
+        if mid in self.active_positions:
+            return
+        try:
+            title = market.get("title", "")
+            tokens = market.get("tokens", [])
+            if len(tokens) < 2:
+                return
+            strike_str = title.split("$")[1].split(" ")[0].replace(",", "")
+            strike = Decimal(strike_str)
+
+            # Compare implied probs across markets
+            probs = []
+            for other_mid, other_market in self.active_markets.items():
+                if other_mid == mid:
+                    continue
+                try:
+                    other_title = other_market.get("title", "")
+                    other_strike_str = other_title.split("$")[1].split(" ")[0].replace(",", "")
+                    other_strike = Decimal(other_strike_str)
+                    other_exp_str = other_market.get("expires_at", "")
+                    if not other_exp_str:
+                        continue
+                    other_exp_dt = datetime.fromisoformat(other_exp_str.replace("Z", "+00:00"))
+                    other_time_left = (other_exp_dt - datetime.now(timezone.utc)).total_seconds()
+                    other_prob = self._prob(self.btc_price, other_strike, other_time_left)
+                    probs.append(other_prob)
+                except:
+                    continue
+
+            if probs:
+                avg_prob = sum(probs) / len(probs)
+                current_prob = self._prob(self.btc_price, strike, (datetime.fromisoformat(market.get("expires_at", "").replace("Z", "+00:00")) - datetime.now(timezone.utc)).total_seconds())
+                divergence = abs(current_prob - avg_prob)
+                if divergence >= self.cross_market_threshold:
+                    side = "YES" if current_prob > avg_prob else "NO"
+                    price = current_prob if side == "YES" else (1 - current_prob)
+                    await self._open_position(mid, title, side, price, current_prob)
+                    self.log(f"CROSS MARKET | {title[:30]} | Divergence {float(divergence)*100:.1f}%")
+        except Exception as e:
+            logger.debug(f"Cross market error {mid}: {e}")
+
+    async def _asymmetric_strategy(self, mid: str, market: dict):
+        """Asymmetric cheap-side sniping."""
+        if mid in self.active_positions:
+            return
+        try:
+            title = market.get("title", "")
+            tokens = market.get("tokens", [])
+            if len(tokens) < 2:
+                return
+            yes_token = next((t for t in tokens if t.get("outcome") == "Yes"), None)
+            no_token = next((t for t in tokens if t.get("outcome") == "No"), None)
+            if not yes_token or not no_token:
+                return
+
+            yes_price = Decimal(str(yes_token.get("price", 0)))
+            no_price = Decimal(str(no_token.get("price", 0)))
+
+            strike_str = title.split("$")[1].split(" ")[0].replace(",", "")
+            strike = Decimal(strike_str)
+            exp_str = market.get("expires_at", "")
+            if not exp_str:
+                return
+            exp_dt = datetime.fromisoformat(exp_str.replace("Z", "+00:00"))
+            time_left = (exp_dt - datetime.now(timezone.utc)).total_seconds()
+
+            prob_y = self._prob(self.btc_price, strike, time_left)
+            edge_yes = prob_y - yes_price
+            edge_no = (1 - prob_y) - no_price
+
+            if edge_yes >= self.asymmetric_edge_threshold and edge_yes > edge_no:
+                await self._open_position(mid, title, "YES", yes_price, prob_y)
+            elif edge_no >= self.asymmetric_edge_threshold and edge_no > edge_yes:
+                await self._open_position(mid, title, "NO", no_price, 1 - prob_y)
+        except Exception as e:
+            logger.debug(f"Asymmetric error {mid}: {e}")
+
     async def _close_position(self, mid, pos: Position, pnl: Decimal, exit_price: Decimal, reason: str):
         self.cumulative_pnl += pnl
         self.perf.record_trade(pnl, reason)
@@ -467,7 +660,10 @@ class TradingBot:
         text = (
             f"🤖 *RECON HFT* \\| {status}\n"
             f"⚡ Mode: {mode} \\| 📡 Markets: `{mkts}`\n"
-            f"📈 BTC: `{btc}`\n\n"
+            f"📈 BTC: `{btc}`\n"
+            f"🎯 Strategies: Arb`{'✅' if self.enable_arbitrage else '❌'}` "
+            f"Oracle`{'✅' if self.enable_oracle_snipe else '❌'}` "
+            f"Mom`{'✅' if self.enable_momentum else '❌'}`\n\n"
             f"💰 *Portfolio Summary*\n"
             f"├─ Balance:   `{bal}` USDC\n"
             f"├─ Session P&L: `{pnl}` USDC\n"
@@ -497,6 +693,12 @@ class TradingBot:
             ("settp",        self.cmd_set_tp),
             ("setpnl",       self.cmd_set_pnl_alert),
             ("positions",    self.cmd_positions),
+            ("togglearb",    self.cmd_toggle_arbitrage),
+            ("toggleoracle", self.cmd_toggle_oracle),
+            ("togglemomentum", self.cmd_toggle_momentum),
+            ("togglecross",  self.cmd_toggle_cross),
+            ("toggleasym",   self.cmd_toggle_asymmetric),
+            ("strategies",   self.cmd_strategies),
         ]
         for name, fn in handlers:
             self.tg_app.add_handler(CommandHandler(name, fn))
@@ -640,6 +842,46 @@ class TradingBot:
         except Exception as e:
             logger.error(f"Backtest error: {e}", exc_info=True)
             await update.message.reply_text(f"❌ Backtest failed: {self._esc(str(e))}", parse_mode="MarkdownV2")
+
+    @_require_auth
+    async def cmd_toggle_arbitrage(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        self.enable_arbitrage = not self.enable_arbitrage
+        status = "ENABLED" if self.enable_arbitrage else "DISABLED"
+        await update.message.reply_text(f"✅ Arbitrage strategy {status}", parse_mode="MarkdownV2")
+
+    @_require_auth
+    async def cmd_toggle_oracle(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        self.enable_oracle_snipe = not self.enable_oracle_snipe
+        status = "ENABLED" if self.enable_oracle_snipe else "DISABLED"
+        await update.message.reply_text(f"✅ Oracle snipe strategy {status}", parse_mode="MarkdownV2")
+
+    @_require_auth
+    async def cmd_toggle_momentum(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        self.enable_momentum = not self.enable_momentum
+        status = "ENABLED" if self.enable_momentum else "DISABLED"
+        await update.message.reply_text(f"✅ Momentum strategy {status}", parse_mode="MarkdownV2")
+
+    @_require_auth
+    async def cmd_toggle_cross(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        self.enable_cross_market = not self.enable_cross_market
+        status = "ENABLED" if self.enable_cross_market else "DISABLED"
+        await update.message.reply_text(f"✅ Cross-market strategy {status}", parse_mode="MarkdownV2")
+
+    @_require_auth
+    async def cmd_toggle_asymmetric(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        self.enable_asymmetric = not self.enable_asymmetric
+        status = "ENABLED" if self.enable_asymmetric else "DISABLED"
+        await update.message.reply_text(f"✅ Asymmetric strategy {status}", parse_mode="MarkdownV2")
+
+    @_require_auth
+    async def cmd_strategies(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        lines = ["🤖 *Strategy Status*\n━━━━━━━━━━━━━━━━━━"]
+        lines.append(f"├─ Arbitrage:     `{'✅' if self.enable_arbitrage else '❌'}`")
+        lines.append(f"├─ Oracle Snipe:  `{'✅' if self.enable_oracle_snipe else '❌'}`")
+        lines.append(f"├─ Momentum:      `{'✅' if self.enable_momentum else '❌'}`")
+        lines.append(f"├─ Cross-Market:  `{'✅' if self.enable_cross_market else '❌'}`")
+        lines.append(f"└─ Asymmetric:    `{'✅' if self.enable_asymmetric else '❌'}`")
+        await update.message.reply_text("\n".join(lines), parse_mode="MarkdownV2")
 
     async def _handle_cb(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         q = update.callback_query

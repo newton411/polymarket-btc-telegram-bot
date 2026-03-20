@@ -16,6 +16,7 @@ export default function RootLayout() {
     <QueryClientProvider client={queryClient}>
       <Stack screenOptions={{ headerShown: false }}>
         <Stack.Screen name="index" />
+        <Stack.Screen name="strategies" />
         <Stack.Screen name="+not-found" />
       </Stack>
       <StatusBar style="light" />

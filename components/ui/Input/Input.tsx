@@ -47,7 +47,6 @@ import {
   Text,
   StyleSheet,
   TouchableOpacity,
-  Platform,
 } from 'react-native';
 import Animated, {
   useAnimatedStyle,
