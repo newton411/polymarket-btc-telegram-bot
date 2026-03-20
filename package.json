@@ -24,6 +24,7 @@
     "prebuild:clean": "EXPO_NO_TELEMETRY=1 npx expo prebuild --clean"
   },
   "dependencies": {
+    "@blinkdotnew/react-native": "^1.0.0",
     "@blinkdotnew/sdk": "2.3.7",
     "@expo/vector-icons": "^15.0.3",
     "@legendapp/list": "^2.0.16",

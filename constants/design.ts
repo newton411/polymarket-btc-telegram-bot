@@ -23,20 +23,20 @@
 
 export const colors = {
   // Brand Colors
-  primary: '#2563EB',
-  primaryDark: '#1E40AF',
-  primaryLight: '#3B82F6',
-  primaryTint: '#DBEAFE',
+  primary: '#7C3AED',      // Violet
+  primaryDark: '#6D28D9',
+  primaryLight: '#8B5CF6',
+  primaryTint: '#EDE9FE',
 
   secondary: '#64748B',
   secondaryDark: '#475569',
   secondaryLight: '#94A3B8',
   secondaryTint: '#F1F5F9',
 
-  accent: '#8B5CF6',
-  accentDark: '#7C3AED',
-  accentLight: '#A78BFA',
-  accentTint: '#EDE9FE',
+  accent: '#EC4899',       // Pink
+  accentDark: '#DB2777',
+  accentLight: '#F472B6',
+  accentTint: '#FCE7F3',
 
   // Background Colors
   background: '#FFFFFF',
@@ -44,9 +44,9 @@ export const colors = {
   backgroundTertiary: '#F1F5F9',
 
   // Dark Mode Backgrounds
-  backgroundDark: '#0F172A',
-  backgroundDarkSecondary: '#1E293B',
-  backgroundDarkTertiary: '#334155',
+  backgroundDark: '#0B0A0F',
+  backgroundDarkSecondary: '#16141D',
+  backgroundDarkTertiary: '#211E2E',
 
   // Text Colors
   text: '#1E293B',
