@@ -445,6 +445,8 @@ class TradingBot:
         bal    = self._esc(f"{float(self.perf.balance):,.2f}")
         pnl    = self._esc(f"{float(self.cumulative_pnl):+.4f}")
         wr     = self._esc(f"{self.perf.win_rate:.1f}")
+        pf     = self._esc(f"{self.perf.profit_factor:.3f}")
+        mdd    = self._esc(f"{self.perf.max_drawdown*100:.2f}")
         cnt    = self.perf.n
         pos_n  = len(self.active_positions)
         mkts   = len(self.active_markets)
@@ -466,12 +468,13 @@ class TradingBot:
             f"🤖 *RECON HFT* \\| {status}\n"
             f"⚡ Mode: {mode} \\| 📡 Markets: `{mkts}`\n"
             f"📈 BTC: `{btc}`\n\n"
-            f"💰 *Portfolio*\n"
+            f"💰 *Portfolio Summary*\n"
             f"├─ Balance:   `{bal}` USDC\n"
             f"├─ Session P&L: `{pnl}` USDC\n"
             f"├─ Win Rate:  `{wr}%` \\({cnt} trades\\)\n"
-            f"└─ Positions: `{pos_n}` open\n\n"
-            f"📂 *Active Positions*\n{pos_lines}\n"
+            f"├─ Profit Factor: `{pf}`\n"
+            f"└─ Max Drawdown:  `{mdd}%`\n\n"
+            f"📂 *Active Positions* \\({pos_n}\\)\n{pos_lines}\n"
             f"📋 *Latest Activity*\n"
             f"```\n{logs}\n```"
         )
@@ -618,7 +621,11 @@ class TradingBot:
         )
 
         try:
-            from bot.backtest import Backtester
+            # Support both `python bot/main.py` and `python -m bot.main`
+            try:
+                from bot.backtest import Backtester
+            except ModuleNotFoundError:
+                from backtest import Backtester
             bt = Backtester(
                 limit=limit,
                 edge_threshold=float(self.edge_threshold),

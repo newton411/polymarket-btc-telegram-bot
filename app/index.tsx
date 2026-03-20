@@ -213,34 +213,27 @@ function OnboardingScreen({
     finally { setBusy(false); }
   }, [onGoogle]);
 
+  const errorMsg = localError || authError || '';
+
   // ── Auth form (last step on web) ───────────────────────────────────────────
   if (authStep !== 'info') {
     const isSignUp = authStep === 'signup';
-    const busy = busy; // This was a typo in the original code, should be `busy`
-    const errorMsg = authError || localError;
-
     return (
       <View style={ob.container}>
-        <LinearGradient colors={['rgba(204,255,0,0.08)', '#000']} style={StyleSheet.absoluteFillObject} />
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={ob.form}>
-          <TouchableOpacity style={ob.backRow} onPress={() => setAuthStep('info')}>
-            <Ionicons name="arrow-back" size={16} color="#555" />
-            <Text style={ob.backText}>Back</Text>
-          </TouchableOpacity>
+        <LinearGradient colors={['rgba(204,255,0,0.07)', '#000']} style={StyleSheet.absoluteFillObject} />
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1, justifyContent: 'center' }}>
+          <Animated.View entering={FadeInDown.duration(400)} style={ob.form}>
+            {/* back */}
+            <TouchableOpacity onPress={() => { setAuthStep('info'); setLocalError(''); }} style={ob.backRow}>
+              <Ionicons name="arrow-back" size={18} color="#555" />
+              <Text style={ob.backText}>Back</Text>
+            </TouchableOpacity>
 
-          <Animated.View entering={FadeInDown}>
-            <Text style={ob.formTitle}>{isSignUp ? 'CREATE_ACCOUNT' : 'SIGN_IN'}</Text>
-            <Text style={ob.formSub}>RECON HFT TERMINAL v2</Text>
+            <MaterialCommunityIcons name="flash-circle" size={44} color={colors.primary} style={{ marginBottom: 10 }} />
+            <Text style={ob.formTitle}>RECON HFT</Text>
+            <Text style={ob.formSub}>{isSignUp ? 'Create your account' : 'Sign in to continue'}</Text>
 
-            {isWeb && (
-              <View style={[ob.errorBox, { backgroundColor: 'rgba(255,165,0,0.1)', borderColor: 'rgba(255,165,0,0.3)' }]}>
-                <Ionicons name="information-circle-outline" size={14} color="#FFA500" />
-                <Text style={[ob.errorText, { color: '#FFA500' }]}>
-                  Web Preview restricted: Google Login is unavailable in this environment. Please use Email + Password.
-                </Text>
-              </View>
-            )}
-
+            {/* error */}
             {!!errorMsg && (
               <View style={ob.errorBox}>
                 <Ionicons name="alert-circle-outline" size={14} color={colors.error} />

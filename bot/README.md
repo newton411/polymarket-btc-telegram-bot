@@ -1,50 +1,58 @@
-# RECON HFT — Polymarket 5-Min BTC Trading Bot
+# RECON HFT — Polymarket 5-Min BTC Bot
 
-A production-grade HFT bot that targets 5-minute Bitcoin Up/Down prediction markets on Polymarket using a Bayesian Z-Score edge detection strategy.
+A high-frequency trading bot that targets 5-minute Bitcoin prediction markets on Polymarket using a Bayesian Z-Score edge-detection strategy, controlled via a live Telegram dashboard.
+
+---
 
 ## Features
 
-- **Bayesian Z-Score Strategy** — Models BTC resolution probability using volatility-adjusted time decay
-- **Stop-Loss & Take-Profit** — Automated risk management based on probability shifts (default: SL 5%, TP 15%)
-- **Real-time P&L Alerts** — Threshold-triggered Telegram notifications for significant gains/losses
-- **Backtesting** — Simulate strategy against real historical Binance OHLCV data from inside Telegram
-- **Deep Performance Stats** — Win rate, Sharpe ratio, max drawdown, profit factor, exit breakdown
-- **Dry Run Mode** — Test all logic without placing real orders
+| Feature | Details |
+|---|---|
+| **Bayesian Z-Score Engine** | Models resolution probability based on BTC spot price, strike, and time-to-expiry |
+| **Stop-Loss / Take-Profit** | Automated risk management via configurable probability-shift thresholds |
+| **Backtesting Module** | Simulate strategy on real Binance OHLCV history; full Sharpe, drawdown, win-rate report |
+| **Real-Time PnL Alerts** | Telegram notification whenever cumulative PnL crosses a configurable threshold |
+| **Deep Stats Dashboard** | Win rate, avg win/loss, profit factor, max drawdown, Sharpe ratio, exit breakdown |
+| **DRY_RUN Mode** | Full simulation without placing real orders — safe for testing |
+| **Live Positions Tracking** | Dashboard shows up to 3 open positions with side, entry price, and age |
+
+---
 
 ## Telegram Commands
 
 | Command | Description |
-|---------|-------------|
-| `/start` | Open the live auto-refreshing dashboard |
-| `/status` | Snapshot of current portfolio & bot state |
-| `/stats` | **Deep performance stats**: win rate, Sharpe ratio, drawdown, profit factor |
-| `/backtest [n]` | Run backtest on last `n` 1-minute candles (default 1500, max 3000) |
+|---|---|
+| `/start` | Open the live dashboard with inline buttons |
+| `/status` | Full portfolio + bot health snapshot |
+| `/stats` | **Deep performance stats** — win rate, avg win/loss, drawdown, Sharpe |
 | `/positions` | List all currently open positions |
-| `/pause` | Pause trading engine |
-| `/resume` | Resume trading engine |
-| `/setthreshold <val>` | Set minimum edge required to open a trade (e.g. `0.10`) |
-| `/setsl <val>` | Set stop-loss probability shift threshold (e.g. `0.05`) |
-| `/settp <val>` | Set take-profit probability shift threshold (e.g. `0.15`) |
-| `/setpnl <val>` | Set P&L alert threshold in USDC (e.g. `5.0`) |
+| `/backtest [N]` | Simulate strategy on last N 1-minute BTC candles (default 1500) |
+| `/pause` | Pause the trading engine |
+| `/resume` | Resume the trading engine |
+| `/setthreshold 0.10` | Set minimum edge required to enter a trade |
+| `/setsl 0.05` | Set stop-loss probability-shift threshold |
+| `/settp 0.15` | Set take-profit probability-shift threshold |
+| `/setpnl 5.0` | Set P&L alert threshold in USDC |
 
 ### Dashboard Inline Buttons
 
-| Button | Action |
-|--------|--------|
-| 🔄 Refresh | Re-render the latest dashboard state |
-| ⏸ Pause/Resume | Toggle the trading engine |
-| 📊 Deep Stats | Send full performance report |
-| 📂 Positions | List open positions |
+- **🔄 Refresh** — update the dashboard message in-place
+- **⏸ Pause/Resume** — toggle trading engine
+- **📊 Deep Stats** — post the full performance stats block
+- **📂 Positions** — list open positions
+
+---
 
 ## Setup
 
-### 1. Install dependencies
+### 1. Install Python Dependencies
 
 ```bash
+cd bot
 pip install -r requirements.txt
 ```
 
-### 2. Configure environment
+### 2. Configure Environment
 
 Copy `.env.example` to `.env` and fill in your values:
 
@@ -53,58 +61,79 @@ cp .env.example .env
 ```
 
 | Variable | Description |
-|----------|-------------|
-| `TELEGRAM_BOT_TOKEN` | From @BotFather |
+|---|---|
+| `TELEGRAM_BOT_TOKEN` | From [@BotFather](https://t.me/BotFather) |
 | `TELEGRAM_ALLOWED_USER_ID` | Your Telegram numeric user ID |
-| `POLYMARKET_ADDRESS` | Your API wallet address (provided) |
-| `POLYMARKET_PK` | Your private key for signing orders |
-| `POLYMARKET_API_KEY` | CLOB API key |
-| `POLYMARKET_API_PASSPHRASE` | CLOB passphrase |
-| `POLYMARKET_API_SECRET` | CLOB secret |
-| `TRADING_MODE` | `DRY_RUN` or `LIVE` |
-| `EDGE_THRESHOLD` | Min edge to enter trade (default `0.10`) |
-| `STOP_LOSS_PCT` | SL threshold (default `0.05`) |
-| `TAKE_PROFIT_PCT` | TP threshold (default `0.15`) |
-| `PNL_ALERT_THRESHOLD` | USDC delta to trigger alert (default `5.0`) |
-| `INITIAL_BALANCE` | Starting balance for tracking (default `5000.0`) |
+| `POLYMARKET_ADDRESS` | `0xc7b9939135F5143D5b9eB968cf6f93566E31ff52` ← your API wallet |
+| `POLYMARKET_PK` | Private key for signing orders (never the custodial wallet PK) |
+| `POLYMARKET_API_KEY` | From [Polymarket API](https://docs.polymarket.com/api-reference/authentication) |
+| `POLYMARKET_API_PASSPHRASE` | — |
+| `POLYMARKET_API_SECRET` | — |
+| `TRADING_MODE` | `DRY_RUN` (safe) or `LIVE` |
+| `EDGE_THRESHOLD` | Default `0.10` (10% minimum edge) |
+| `STOP_LOSS_PCT` | Default `0.05` (5% probability shift triggers SL) |
+| `TAKE_PROFIT_PCT` | Default `0.15` (15% probability shift triggers TP) |
+| `PNL_ALERT_THRESHOLD` | Default `5.0` USDC — alert when cumulative PnL moves by this much |
+| `INITIAL_BALANCE` | Simulated starting balance for DRY_RUN performance tracking |
 
-### 3. Run
+### 3. Run the Bot
 
 ```bash
+# From project root
 python -m bot.main
+
+# Or from within the bot folder
+cd bot && python main.py
 ```
 
-### 4. Backtest (standalone CLI)
+### 4. Run a Backtest Standalone
 
 ```bash
 python -m bot.backtest --limit 2000 --edge 0.10 --sl 0.05 --tp 0.15
 ```
 
-## Strategy
+---
 
-The bot computes a **Bayesian implied probability** for each 5-minute BTC market:
-
-```
-Z = (BTC_price − Strike) / (σ × √(t/T))
-P(Yes) ≈ 0.5 + Z/2            (linear CDF approximation)
-Edge   = P(Yes) − Market_Price
-```
-
-Where:
-- `σ = 100 USD` — volatility proxy per 5 minutes
-- `t/T` — fraction of time remaining until expiry
-- Entry when `Edge > threshold`
-
-Positions are monitored every 3 seconds. They close via:
-- **Stop-Loss** when current probability drops below `entry × (1 − SL_pct)`
-- **Take-Profit** when current probability rises above `entry + (1 − entry) × TP_pct`
-- **Expiry** — settles at 1.0 (win) or 0.0 (loss) at market resolution
-
-## Wallet
+## Strategy Formula
 
 ```
-Address: 0xc7b9939135F5143D5b9eB968cf6f93566E31ff52
-Note: This address is for API use only. Do NOT send funds here.
+Z = (BTC_Price − Strike) / (σ × √(t/T))
+
+P(Yes) ≈ 0.5 + Z/2        (linear CDF approximation)
+
+Edge_YES = P(Yes) − Market_Price_YES
+Edge_NO  = P(No)  − Market_Price_NO
+
+Enter when Edge > edge_threshold
 ```
 
-API credentials are obtained from: https://docs.polymarket.com/api-reference/authentication
+- **σ** = 100 USD (volatility proxy per 5-minute window)
+- **t** = seconds remaining to market expiry
+- **T** = 300 s (full 5-minute window)
+
+---
+
+## Architecture
+
+```
+main.py
+├── TradingBot
+│   ├── price_feed_loop()       — BTC/USDT tick from Binance
+│   ├── market_discovery_loop() — Polymarket Gamma API scan
+│   ├── trading_loop()
+│   │   ├── _manage_positions() — SL / TP / expiry resolution
+│   │   └── _scan_entries()     — Z-Score edge detection
+│   ├── PerformanceTracker      — live win rate, drawdown, Sharpe
+│   └── Telegram Commands       — /start /stats /backtest ...
+│
+backtest.py
+└── Backtester                  — Binance OHLCV simulation engine
+```
+
+---
+
+## Important Notes
+
+- **`POLYMARKET_ADDRESS`** is your Polymarket API wallet (`0xc7b993...ff52`). Do **not** send funds here directly — this address is for API authentication only.
+- Orders are only placed when `TRADING_MODE=LIVE` **and** the CLOB client initialises successfully.
+- `DRY_RUN` mode fully simulates position tracking, SL/TP, PnL alerts, and stats — no funds are moved.

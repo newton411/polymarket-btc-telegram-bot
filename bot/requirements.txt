@@ -1,9 +1,7 @@
 py-clob-client
-python-telegram-bot --upgrade
+python-telegram-bot[job-queue]
 ccxt
 python-dotenv
 requests
 tenacity
-decimal
-asyncio
 websockets

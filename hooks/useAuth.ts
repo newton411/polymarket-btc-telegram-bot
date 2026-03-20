@@ -34,12 +34,10 @@ export function useAuth() {
         const client = await getAuthClient();
         if (!alive) return;
 
-        // Subscribe to auth state changes
         const unsub = client.auth.onAuthStateChanged((state: any) => {
           if (!alive) return;
           setUser(state.user ?? null);
           setAuth(!!state.isAuthenticated);
-          // Only set loading false once we get the first real state emission
           setLoad(!!state.isLoading);
         });
 
@@ -52,7 +50,7 @@ export function useAuth() {
       }
     })();
 
-    // Safety net: if auth state never fires, unblock UI after 4s
+    // Safety net: unblock UI after 4s if auth state never fires
     const timeout = setTimeout(() => {
       if (alive) setLoad(false);
     }, 4000);
@@ -64,7 +62,7 @@ export function useAuth() {
     };
   }, []);
 
-  // ── Google OAuth ────────────────────────────────────────────────────────────
+  // ── Google OAuth ─────────────────────────────────────────────────────────
   const signInWithGoogle = async () => {
     if (Platform.OS === 'web') {
       const msg = 'Google sign-in is not available in the browser preview. Use email + password instead.';
@@ -82,7 +80,7 @@ export function useAuth() {
     }
   };
 
-  // ── Email / password ─────────────────────────────────────────────────────────
+  // ── Email / password ──────────────────────────────────────────────────────
   const signInWithEmail = async (email: string, password: string) => {
     setError(null);
     try {
@@ -107,7 +105,7 @@ export function useAuth() {
     }
   };
 
-  // ── Sign out ─────────────────────────────────────────────────────────────────
+  // ── Sign out ──────────────────────────────────────────────────────────────
   const signOut = async () => {
     setError(null);
     try {
@@ -123,7 +121,7 @@ export function useAuth() {
     isLoading,
     isAuthenticated,
     authError,
-    /** true when the app is running in a browser (web) */
+    /** true when running in browser — Google OAuth unavailable */
     isWeb: Platform.OS === 'web',
     signInWithGoogle,
     signInWithEmail,
