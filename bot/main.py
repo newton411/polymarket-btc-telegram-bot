@@ -341,6 +341,18 @@ class TradingBot:
         self.price_feed = PriceFeed()
         self.tg_app: Optional[Application] = None
 
+        # Real Polymarket client (Gamma + CLOB)
+        try:
+            from polymarket import PolymarketClient
+            self.pm_client = PolymarketClient()
+        except ImportError:
+            try:
+                from bot.polymarket import PolymarketClient
+                self.pm_client = PolymarketClient()
+            except ImportError:
+                self.pm_client = None
+                logger.warning("PolymarketClient not available")
+
     # ─────────────────────────────────────────────────────────────────────
     #  UTILITIES
     # ─────────────────────────────────────────────────────────────────────
@@ -405,23 +417,69 @@ class TradingBot:
             await asyncio.sleep(1)
 
     async def market_discovery_loop(self):
-        url = "https://gamma-api.polymarket.com/markets"
+        """Real-time market discovery via Gamma API (async, no blocking)."""
         while True:
             try:
-                r = requests.get(url, params={"active": "true", "closed": "false",
-                                              "query": "Bitcoin 5 minutes"}, timeout=10)
-                if r.ok:
-                    found = {
-                        m["id"]: m for m in r.json()
-                        if "Bitcoin" in m.get("title", "") and "5 minutes" in m.get("title", "")
+                markets = await self.pm_client.discover_btc_markets()
+                # Convert MarketInfo list → dict keyed by market_id for strategies
+                found = {}
+                for mi in markets:
+                    # Build a compatible dict for strategy functions
+                    tokens = []
+                    for t in mi.tokens:
+                        tokens.append({
+                            "token_id": t.token_id,
+                            "outcome":  t.outcome,
+                            "price":    str(t.price),
+                        })
+                    found[mi.market_id] = {
+                        "id":          mi.market_id,
+                        "title":       mi.question,
+                        "question":    mi.question,
+                        "active":      mi.active,
+                        "closed":      mi.closed,
+                        "expires_at":  mi.end_date_iso,
+                        "endDateIso":  mi.end_date_iso,
+                        "volume":      str(mi.volume),
+                        "volume24hr":  str(mi.volume_24hr),
+                        "liquidity":   str(mi.liquidity),
+                        "tokens":      tokens,
+                        "yes_price":   str(mi.yes_price),
+                        "no_price":    str(mi.no_price),
                     }
-                    self.active_markets = found
-                    self.log(f"Discovered {len(found)} 5-min BTC markets")
-                else:
-                    self.log(f"Gamma API {r.status_code}")
+                self.active_markets = found
+                self.log(f"Discovered {len(found)} 5-min BTC markets (real-time)")
+                # Also push to Blink DB for the web app
+                await self._push_markets_to_db(list(markets)[:10])
             except Exception as e:
                 self.log(f"Market discovery error: {e}")
-            await asyncio.sleep(60)
+            await asyncio.sleep(30)   # Refresh every 30 seconds
+
+    async def _push_markets_to_db(self, markets):
+        """Push discovered markets to Blink DB so the web app can display them."""
+        try:
+            import aiohttp
+            blink_url = "https://db.blink.new/api/db/polymarket-btc-bot-ec8rjv2k"
+            for mi in markets:
+                payload = {
+                    "id":           mi.market_id[:36] if mi.market_id else "",
+                    "title":        mi.question[:200],
+                    "strike_price": 0.0,
+                    "current_price": float(mi.yes_price),
+                    "edge":          float(mi.yes_price - Decimal("0.5")),
+                    "expires_at":   mi.end_date_iso or "",
+                }
+                try:
+                    async with aiohttp.ClientSession() as s:
+                        await s.post(
+                            f"{blink_url}/markets",
+                            json=payload,
+                            timeout=aiohttp.ClientTimeout(total=5),
+                        )
+                except Exception:
+                    pass   # DB push is best-effort
+        except Exception:
+            pass
 
     # ─────────────────────────────────────────────────────────────────────
     #  TRADING ENGINE
@@ -836,6 +894,9 @@ class TradingBot:
             ("togglecross",  self.cmd_toggle_cross),
             ("toggleasym",   self.cmd_toggle_asymmetric),
             ("strategies",   self.cmd_strategies),
+            ("markets",      self.cmd_markets),
+            ("price",        self.cmd_price),
+            ("scan",         self.cmd_scan),
         ]
         for name, fn in handlers:
             self.tg_app.add_handler(CommandHandler(name, fn))

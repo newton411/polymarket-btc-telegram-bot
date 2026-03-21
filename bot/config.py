@@ -18,7 +18,7 @@ class Config:
     POLYMARKET_ADDRESS: Optional[str] = os.getenv("POLYMARKET_ADDRESS")
 
     # Telegram Bot
-    TELEGRAM_TOKEN: str = os.getenv("TELEGRAM_TOKEN", "7377493035:AAGj7givCiG02bio_4TnVxLxV31fuOUHzqc")
+    TELEGRAM_TOKEN: str = os.getenv("TELEGRAM_TOKEN", "8707545048:AAF2XduF-CJQ1pH5Ipqmdjl3riVe82S0toE")
     ALLOWED_USER_ID: Optional[int] = int(os.getenv("ALLOWED_USER_ID", "0")) if os.getenv("ALLOWED_USER_ID") else None
 
     # Trading Configuration
