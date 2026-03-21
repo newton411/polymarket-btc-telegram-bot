@@ -1,5 +1,5 @@
 """
-Polymarket API integration: Gamma API for market discovery and CLOB for trading
+Polymarket API integration: Gamma API for market discovery and CLOB trading.
 """
 import asyncio
 import json
@@ -32,7 +32,7 @@ class MarketInfo:
 class OrderBook:
     """Order book snapshot."""
     market_id: str
-    yes_asks: List[Tuple[Decimal, Decimal]]  # [(price, size), ...]
+    yes_asks: List[Tuple[Decimal, Decimal]]
     yes_bids: List[Tuple[Decimal, Decimal]]
     no_asks: List[Tuple[Decimal, Decimal]]
     no_bids: List[Tuple[Decimal, Decimal]]
@@ -48,7 +48,6 @@ class PolymarketClient:
             'Accept': 'application/json'
         })
 
-        # Initialize CLOB client if available
         self.clob_client = None
         if not config.DRY_RUN:
             try:
@@ -87,7 +86,6 @@ class PolymarketClient:
     async def discover_btc_markets(self) -> List[MarketInfo]:
         """Discover active 5-minute BTC Up/Down markets."""
         try:
-            # Query for BTC markets
             params = {
                 'slug_contains': config.BTC_MARKET_FILTER,
                 'resolution': config.RESOLUTION_FILTER,
@@ -100,35 +98,30 @@ class PolymarketClient:
 
             markets_response = []
             if isinstance(data, dict) and 'markets' in data:
-                markets_response = data.get('markets', [])
+                markets_response = data['markets']
             elif isinstance(data, list):
                 markets_response = data
 
             markets = []
-            # Primary filter for BTC 5-min markets, fallback to all active markets.
+
             def _is_btc_5m(market):
                 q = market.get('question', '').lower()
                 s = market.get('slug', '').lower()
                 res = market.get('resolution', '') or ''
                 res_name = (market.get('resolutionName', '') or '').lower()
 
-                is_btc = 'bitcoin' in q or 'bitcoin' in s
+                is_btc = 'bitcoin' in q or 'bitcoin' in s or 'btc' in q or 'btc' in s
                 has_5m = '5' in res or '5' in res_name or 'min' in res or 'minute' in res_name
                 return is_btc and has_5m
 
             filter_candidates = [m for m in markets_response if _is_btc_5m(m)]
             if not filter_candidates:
-                # Fallback: return all active markets in feed (real-time from polymarket)
-                filter_candidates = markets_response[:10]
-            if not filter_candidates:
                 filter_candidates = markets_response[:10]
 
             for market in filter_candidates:
-                # Enrich fallback markets which may not match strict BTC filter
                 if not market.get('question'):
                     market['question'] = market.get('slug', 'Unknown market')
 
-                # Parse outcomes and prices (API sometimes returns JSON string)
                 outcomes = market.get('outcomes', [])
                 if isinstance(outcomes, str):
                     try:
@@ -156,7 +149,7 @@ class PolymarketClient:
                     continue
 
                 market_info = MarketInfo(
-                    market_id=market['id'],
+                    market_id=market.get('id', ''),
                     question=market.get('question', ''),
                     active=market.get('active', False),
                     closed=market.get('closed', False),
@@ -189,9 +182,7 @@ class PolymarketClient:
         """Get order book for a market."""
         try:
             if self.clob_client:
-                # Use CLOB API
                 book = await self.clob_client.get_order_book(market_id)
-                # Parse the response
                 yes_asks = [(Decimal(str(p)), Decimal(str(s))) for p, s in book.get('asks', {}).get('yes', [])]
                 yes_bids = [(Decimal(str(p)), Decimal(str(s))) for p, s in book.get('bids', {}).get('yes', [])]
                 no_asks = [(Decimal(str(p)), Decimal(str(s))) for p, s in book.get('asks', {}).get('no', [])]
@@ -206,18 +197,14 @@ class PolymarketClient:
                     timestamp=asyncio.get_event_loop().time()
                 )
             else:
-                # Simulate order book for dry run
                 import random
                 import time
 
-                # Generate realistic simulated order book
                 mid_price = Decimal('0.5') + Decimal(str(random.uniform(-0.1, 0.1)))
                 spread = Decimal('0.02')
 
-                yes_asks = [(mid_price + spread + Decimal(str(i * 0.01)), Decimal(str(random.uniform(10, 100))))
-                           for i in range(5)]
-                yes_bids = [(mid_price - spread - Decimal(str(i * 0.01)), Decimal(str(random.uniform(10, 100))))
-                           for i in range(5)]
+                yes_asks = [(mid_price + spread + Decimal(str(i * 0.01)), Decimal(str(random.uniform(10, 100)))) for i in range(5)]
+                yes_bids = [(mid_price - spread - Decimal(str(i * 0.01)), Decimal(str(random.uniform(10, 100)))) for i in range(5)]
                 no_asks = [(Decimal('1') - p, s) for p, s in yes_bids]
                 no_bids = [(Decimal('1') - p, s) for p, s in yes_asks]
 
@@ -258,16 +245,14 @@ class PolymarketClient:
             return False
 
         try:
-            # Create order
             order_args = {
                 "market": market_id,
                 "side": side.upper(),
                 "price": float(price),
                 "size": float(size),
-                "fee_rate_bps": 0  # No fee for limit orders
+                "fee_rate_bps": 0
             }
 
-            # Place order
             result = await self.clob_client.create_order(order_args)
             logger.info(f"Order placed: {result}")
             return True
