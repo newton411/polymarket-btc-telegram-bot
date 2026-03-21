@@ -4,20 +4,104 @@ Main entry point orchestrating all components
 """
 import asyncio
 import logging
+import os
 import signal
 import sys
+from dataclasses import dataclass
 from datetime import datetime, timezone
+from decimal import Decimal
 from typing import List, Dict, Optional
 
 from config import config
 from polymarket import PolymarketClient, MarketInfo
 from strategies import TradingStrategies
+from price_feed import PriceFeed
+from telegram import Update
+from telegram.ext import ContextTypes
 from telegram_bot import TelegramBot
 from utils import setup_logging, validate_config, load_env_file, RateLimiter, log_opportunity, log_trade
 
 # Setup logging
 setup_logging()
 logger = logging.getLogger(__name__)
+
+@dataclass
+class Position:
+    market_id: str
+    title: str
+    side: str
+    size: Decimal
+    entry_price: Decimal
+    btc_entry: Decimal
+
+
+class PerformanceTracker:
+    def __init__(self, initial_balance: Decimal):
+        self.initial_balance = initial_balance
+        self.balance = initial_balance
+        self.trades = []
+        self.equity_curve = [float(initial_balance)]
+
+    def record_trade(self, pnl: Decimal, exit_reason: str):
+        self.balance += pnl
+        self.trades.append({
+            "pnl": pnl,
+            "exit_reason": exit_reason,
+            "timestamp": datetime.now(timezone.utc),
+        })
+        self.equity_curve.append(float(self.balance))
+
+    @property
+    def n(self):
+        return len(self.trades)
+
+    @property
+    def wins(self):
+        return [t for t in self.trades if t["pnl"] > 0]
+
+    @property
+    def losses(self):
+        return [t for t in self.trades if t["pnl"] <= 0]
+
+    @property
+    def win_rate(self):
+        return len(self.wins) / self.n * 100 if self.n else 0.0
+
+    @property
+    def total_pnl(self):
+        return sum(t["pnl"] for t in self.trades) if self.trades else Decimal("0")
+
+    @property
+    def avg_win(self):
+        return sum(t["pnl"] for t in self.wins) / len(self.wins) if self.wins else Decimal("0")
+
+    @property
+    def avg_loss(self):
+        return sum(t["pnl"] for t in self.losses) / len(self.losses) if self.losses else Decimal("0")
+
+    @property
+    def max_drawdown(self):
+        peak = max(self.equity_curve) if self.equity_curve else float(self.initial_balance)
+        trough_after_peak = float(self.balance)
+        dd = (peak - trough_after_peak) / peak if peak > 0 else 0.0
+        return max(0.0, dd)
+
+    @property
+    def sharpe(self):
+        if self.n < 2:
+            return 0.0
+        pnls = [float(t["pnl"]) for t in self.trades]
+        mean = sum(pnls) / self.n
+        var = sum((x - mean) ** 2 for x in pnls) / self.n
+        std = (var ** 0.5) if var > 0 else 1e-9
+        return (mean / std) * (288 * 252) ** 0.5
+
+    @property
+    def profit_factor(self):
+        gross_win = float(sum(t["pnl"] for t in self.wins))
+        gross_loss = abs(float(sum(t["pnl"] for t in self.losses)))
+        return gross_win / gross_loss if gross_loss > 0 else float("inf")
+
 
 class TradingBot:
     """Main trading bot orchestrating all components."""
