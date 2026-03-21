@@ -14,11 +14,13 @@ class Config:
     """Central configuration management."""
 
     # Polymarket API
-    POLYMARKET_PRIVATE_KEY: Optional[str] = os.getenv("POLYMARKET_PRIVATE_KEY")
+    POLYMARKET_API_KEY: Optional[str] = os.getenv("POLYMARKET_API_KEY") or os.getenv("POLYMARKET_PRIVATE_KEY")
+    POLYMARKET_API_SECRET: Optional[str] = os.getenv("POLYMARKET_API_SECRET")
+    POLYMARKET_API_PASSPHRASE: Optional[str] = os.getenv("POLYMARKET_API_PASSPHRASE")
     POLYMARKET_ADDRESS: Optional[str] = os.getenv("POLYMARKET_ADDRESS")
 
     # Telegram Bot
-    TELEGRAM_TOKEN: str = os.getenv("TELEGRAM_TOKEN", "7377493035:AAGj7givCiG02bio_4TnVxLxV31fuOUHzqc")
+    TELEGRAM_TOKEN: str = os.getenv("TELEGRAM_TOKEN", "8707545048:AAF2XduF-CJQ1pH5Ipqmdjl3riVe82S0toE")
     ALLOWED_USER_ID: Optional[int] = int(os.getenv("ALLOWED_USER_ID", "0")) if os.getenv("ALLOWED_USER_ID") else None
 
     # Trading Configuration
@@ -50,8 +52,12 @@ class Config:
             raise ValueError("TELEGRAM_TOKEN is required")
 
         if not cls.DRY_RUN:
-            if not cls.POLYMARKET_PRIVATE_KEY:
-                raise ValueError("POLYMARKET_PRIVATE_KEY is required for live trading")
+            if not cls.POLYMARKET_API_KEY:
+                raise ValueError("POLYMARKET_API_KEY (or POLYMARKET_PRIVATE_KEY) is required for live trading")
+            if not cls.POLYMARKET_API_SECRET:
+                raise ValueError("POLYMARKET_API_SECRET is required for live trading")
+            if not cls.POLYMARKET_API_PASSPHRASE:
+                raise ValueError("POLYMARKET_API_PASSPHRASE is required for live trading")
             if not cls.POLYMARKET_ADDRESS:
                 raise ValueError("POLYMARKET_ADDRESS is required for live trading")
             if not cls.ALLOWED_USER_ID:

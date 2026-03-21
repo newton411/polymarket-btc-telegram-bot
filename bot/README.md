@@ -103,7 +103,9 @@ MAX_POSITION_SIZE=20.0
 
 **Optional (for live trading):**
 ```bash
-POLYMARKET_PRIVATE_KEY=your_private_key
+POLYMARKET_API_KEY=your_polymarket_api_key
+POLYMARKET_API_SECRET=your_polymarket_api_secret
+POLYMARKET_API_PASSPHRASE=your_polymarket_passphrase
 POLYMARKET_ADDRESS=your_wallet_address
 ```
 

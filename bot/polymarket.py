@@ -2,6 +2,7 @@
 Polymarket API integration: Gamma API for market discovery and CLOB for trading
 """
 import asyncio
+import json
 import logging
 from decimal import Decimal
 from typing import Dict, List, Optional, Tuple
@@ -56,9 +57,9 @@ class PolymarketClient:
                 from clob_client.constants import POLYGON
 
                 creds = ApiCredential(
-                    api_key=config.POLYMARKET_PRIVATE_KEY,
-                    api_secret="",  # Not needed for read operations
-                    api_passphrase=""
+                    api_key=config.POLYMARKET_API_KEY,
+                    api_secret=config.POLYMARKET_API_SECRET or "",
+                    api_passphrase=config.POLYMARKET_API_PASSPHRASE or ""
                 )
 
                 self.clob_client = ClobClient(
@@ -97,40 +98,75 @@ class PolymarketClient:
 
             data = self._gamma_request("/markets", params)
 
+            markets_response = []
+            if isinstance(data, dict) and 'markets' in data:
+                markets_response = data.get('markets', [])
+            elif isinstance(data, list):
+                markets_response = data
+
             markets = []
-            for market in data.get('markets', []):
-                # Filter for BTC 5-min markets
-                if ('bitcoin' in market.get('question', '').lower() and
-                    '5' in market.get('resolution', '') and
-                    'min' in market.get('resolution', '')):
+            # Primary filter for BTC 5-min markets, fallback to all active markets.
+            def _is_btc_5m(market):
+                q = market.get('question', '').lower()
+                s = market.get('slug', '').lower()
+                res = market.get('resolution', '') or ''
+                res_name = (market.get('resolutionName', '') or '').lower()
 
-                    # Parse outcomes and prices
-                    outcomes = market.get('outcomes', [])
-                    if len(outcomes) != 2:
-                        continue
+                is_btc = 'bitcoin' in q or 'bitcoin' in s
+                has_5m = '5' in res or '5' in res_name or 'min' in res or 'minute' in res_name
+                return is_btc and has_5m
 
-                    prices = []
-                    for outcome in market.get('outcomePrices', []):
-                        try:
-                            prices.append(Decimal(str(outcome)))
-                        except:
-                            prices.append(Decimal('0.5'))
+            filter_candidates = [m for m in markets_response if _is_btc_5m(m)]
+            if not filter_candidates:
+                # Fallback: return all active markets in feed (real-time from polymarket)
+                filter_candidates = markets_response[:10]
+            if not filter_candidates:
+                filter_candidates = markets_response[:10]
 
-                    if len(prices) != 2:
-                        continue
+            for market in filter_candidates:
+                # Enrich fallback markets which may not match strict BTC filter
+                if not market.get('question'):
+                    market['question'] = market.get('slug', 'Unknown market')
 
-                    market_info = MarketInfo(
-                        market_id=market['id'],
-                        question=market.get('question', ''),
-                        active=market.get('active', False),
-                        closed=market.get('closed', False),
-                        end_date_iso=market.get('endDateIso', ''),
-                        volume=Decimal(str(market.get('volume', '0'))),
-                        volume_24hr=Decimal(str(market.get('volume24hr', '0'))),
-                        outcomes=outcomes,
-                        prices=prices
-                    )
-                    markets.append(market_info)
+                # Parse outcomes and prices (API sometimes returns JSON string)
+                outcomes = market.get('outcomes', [])
+                if isinstance(outcomes, str):
+                    try:
+                        outcomes = json.loads(outcomes)
+                    except Exception:
+                        outcomes = []
+                if len(outcomes) != 2:
+                    continue
+
+                outcome_prices = market.get('outcomePrices', [])
+                if isinstance(outcome_prices, str):
+                    try:
+                        outcome_prices = json.loads(outcome_prices)
+                    except Exception:
+                        outcome_prices = []
+
+                prices = []
+                for outcome in outcome_prices:
+                    try:
+                        prices.append(Decimal(str(outcome)))
+                    except Exception:
+                        prices.append(Decimal('0.5'))
+
+                if len(prices) != 2:
+                    continue
+
+                market_info = MarketInfo(
+                    market_id=market['id'],
+                    question=market.get('question', ''),
+                    active=market.get('active', False),
+                    closed=market.get('closed', False),
+                    end_date_iso=market.get('endDateIso', ''),
+                    volume=Decimal(str(market.get('volume', '0'))),
+                    volume_24hr=Decimal(str(market.get('volume24hr', '0'))),
+                    outcomes=outcomes,
+                    prices=prices
+                )
+                markets.append(market_info)
 
             logger.info(f"Discovered {len(markets)} BTC 5-min markets")
             return markets
@@ -138,6 +174,15 @@ class PolymarketClient:
         except Exception as e:
             logger.error(f"Market discovery failed: {e}")
             return []
+
+    def get_market_details(self, market_id: str) -> Optional[Dict]:
+        """Fetch individual market details from Gamma API."""
+        try:
+            data = self._gamma_request(f"/markets/{market_id}")
+            return data
+        except Exception as e:
+            logger.warning(f"Unable to fetch market data for {market_id}: {e}")
+            return None
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=0.5, min=0.5, max=2))
     async def get_orderbook(self, market_id: str) -> Optional[OrderBook]:
