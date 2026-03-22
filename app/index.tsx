@@ -48,6 +48,53 @@ interface Market {
   currentPrice: number;
   edge: number;
   expiresAt: string;
+  yesPrice?: number;
+  noPrice?: number;
+  volume24hr?: number;
+  liquidity?: number;
+}
+
+// ─── Live Polymarket Gamma API feed ───────────────────────────────────────────
+const GAMMA_API = 'https://gamma-api.polymarket.com';
+
+async function fetchLiveMarkets(): Promise<Market[]> {
+  try {
+    const res = await fetch(
+      `${GAMMA_API}/markets?active=true&closed=false&limit=50&order=volume24hr&ascending=false`,
+      { headers: { Accept: 'application/json' } }
+    );
+    if (!res.ok) throw new Error(`Gamma API ${res.status}`);
+    const raw: any[] = await res.json();
+
+    const btc5m = raw.filter(m => {
+      const q = ((m.question || m.title) as string).toLowerCase();
+      return (q.includes('bitcoin') || q.includes('btc')) &&
+             (q.includes('5 min') || q.includes('5min') || q.includes('5-min'));
+    });
+
+    return btc5m.slice(0, 12).map(m => {
+      let prices: number[] = [];
+      try { prices = JSON.parse(m.outcomePrices || '[]'); } catch {}
+      const yes = parseFloat(prices[0] as any) || 0.5;
+      const no  = parseFloat(prices[1] as any) || 0.5;
+      const edge = Math.max(0, (1 - yes - no) * 100);
+      const endDate = m.endDateIso || m.endDate || new Date(Date.now() + 5 * 60_000).toISOString();
+      return {
+        id:          m.conditionId || m.id || String(Math.random()),
+        title:       m.question || m.title || 'Unknown',
+        currentPrice: yes,
+        yesPrice:    yes,
+        noPrice:     no,
+        edge:        parseFloat(edge.toFixed(2)),
+        expiresAt:   endDate,
+        volume24hr:  parseFloat(m.volume24hr || '0'),
+        liquidity:   parseFloat(m.liquidityNum || m.liquidity || '0'),
+      };
+    });
+  } catch (err) {
+    console.warn('[Gamma API]', err);
+    return [];
+  }
 }
 interface Wallet {
   id: string;
@@ -381,23 +428,27 @@ const ob = StyleSheet.create({
 // ─────────────────────────────────────────────────────────────────────────────
 //  DASHBOARD TAB
 // ─────────────────────────────────────────────────────────────────────────────
-function DashboardTab({ markets }: { markets: Market[] }) {
+function DashboardTab({ markets, btcPrice, btcChange }: { markets: Market[]; btcPrice?: number; btcChange?: number }) {
+  const priceStr = btcPrice ? `${btcPrice.toLocaleString('en-US', { maximumFractionDigits: 0 })}` : '—';
+  const changeStr = btcChange != null ? `${btcChange >= 0 ? '+' : ''}${btcChange.toFixed(2)}%` : '';
+  const edgeMarkets = markets.filter(m => m.edge > 0);
+
   return (
     <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ gap: 18, paddingBottom: 16 }}>
       <Animated.View entering={FadeIn.duration(500)} style={dash.ringWrap}>
         <LinearGradient colors={[colors.primary, '#88FF00']} style={dash.ring}>
           <View style={dash.ringInner}>
-            <Text style={dash.ringLabel}>SESSION P&L</Text>
-            <Text style={dash.ringValue}>+$1,420</Text>
-            <Text style={dash.ringSub}>+14.2% today</Text>
+            <Text style={dash.ringLabel}>BTC / USD — LIVE</Text>
+            <Text style={dash.ringValue}>{priceStr}</Text>
+            <Text style={[dash.ringSub, { color: (btcChange ?? 0) >= 0 ? colors.success : colors.error }]}>{changeStr} 24h</Text>
           </View>
         </LinearGradient>
       </Animated.View>
 
       <Animated.View entering={FadeInDown.delay(80)} style={{ flexDirection: 'row', gap: 10 }}>
-        <Tile label="Balance" value="$5,240" sub="+4.2%" accent />
-        <Tile label="Trades" value="312" sub="+12/hr" />
-        <Tile label="Win Rate" value="68%" sub="avg 9.4% edge" />
+        <Tile label="Markets" value={`${markets.length}`} sub={`${edgeMarkets.length} w/ edge`} accent />
+        <Tile label="Avg Edge" value={edgeMarkets.length > 0 ? `${(edgeMarkets.reduce((a, m) => a + m.edge, 0) / edgeMarkets.length).toFixed(1)}%` : '—'} sub="vs implied" />
+        <Tile label="Source" value="LIVE" sub="Gamma API" />
       </Animated.View>
 
       <Animated.View entering={FadeInDown.delay(130)} style={dash.pill}>
@@ -738,10 +789,35 @@ export default function Home() {
   const [activeTab, setActiveTab] = useState<TabId>('DASHBOARD');
   const [profileOpen, setProfileOpen] = useState(false);
 
-  const { data: markets = [] } = useQuery<Market[]>({
-    queryKey: ['markets'],
-    queryFn: async () => (await blink.db.table('markets').list({ orderBy: { expiresAt: 'asc' }, limit: 10 })) as Market[],
-    refetchInterval: 9000,
+  const { data: markets = [], isFetching: marketsFetching } = useQuery<Market[]>({
+    queryKey: ['markets-live'],
+    queryFn: async () => {
+      // Primary: fetch live from Polymarket Gamma API (RobotTraders pattern)
+      const live = await fetchLiveMarkets();
+      if (live.length > 0) return live;
+      // Fallback: use Blink DB (populated by the Python bot)
+      return (await blink.db.table('markets').list({ orderBy: { expiresAt: 'asc' }, limit: 12 })) as Market[];
+    },
+    refetchInterval: 12_000,   // refresh every 12 seconds for real-time feel
+    staleTime: 8_000,
+  });
+
+  // Real-time BTC price from Binance
+  const { data: btcStats } = useQuery<{ price: number; change: number } | null>({
+    queryKey: ['btc-price'],
+    queryFn: async () => {
+      try {
+        const res = await fetch('https://api.binance.com/api/v3/ticker/24hr?symbol=BTCUSDT');
+        if (!res.ok) return null;
+        const d = await res.json();
+        return {
+          price:  parseFloat(d.lastPrice ?? '0'),
+          change: parseFloat(d.priceChangePercent ?? '0'),
+        };
+      } catch { return null; }
+    },
+    refetchInterval: 5_000,    // BTC price every 5 seconds
+    staleTime: 3_000,
   });
 
   // Loading splash
@@ -783,7 +859,7 @@ export default function Home() {
 
       {/* Tab content */}
       <View style={{ flex: 1, paddingHorizontal: 20, paddingTop: 18 }}>
-        {activeTab === 'DASHBOARD' && <DashboardTab markets={markets} />}
+        {activeTab === 'DASHBOARD' && <DashboardTab markets={markets} btcPrice={btcStats?.price} btcChange={btcStats?.change} />}
         {activeTab === 'STRATEGY'  && <StrategyTab  markets={markets} />}
         {activeTab === 'WALLETS'   && <WalletsTab   user={user} />}
         {activeTab === 'LOGS'      && <LogsTab />}

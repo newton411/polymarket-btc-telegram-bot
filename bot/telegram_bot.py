@@ -61,6 +61,10 @@ class TelegramBot:
         self.app.add_handler(CommandHandler("logs", self.cmd_logs))
         self.app.add_handler(CommandHandler("pnl", self.cmd_pnl))
         self.app.add_handler(CommandHandler("tge", self.cmd_tge))
+        self.app.add_handler(CommandHandler("markets", self.cmd_markets))
+        self.app.add_handler(CommandHandler("price", self.cmd_price))
+        self.app.add_handler(CommandHandler("scan", self.cmd_scan))
+        self.app.add_handler(CommandHandler("book", self.cmd_book))
 
     async def cmd_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         user = update.effective_user
@@ -798,6 +802,193 @@ class TelegramBot:
             )
         except Exception as e:
             logger.error(f"Dashboard update failed: {e}")
+
+    # ── New real-time market commands ───────────────────────────────────────
+
+    async def cmd_markets(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """
+        /markets — List all active BTC 5-min markets with live prices.
+        Fetches fresh data from Gamma API every call.
+        """
+        user = update.effective_user
+        if not self._authorize(user):
+            return
+
+        await update.message.reply_text("🔄 Fetching live Polymarket data…")
+
+        try:
+            markets = await self.clob.discover_markets()
+        except Exception as e:
+            await update.message.reply_text(f"❌ Market fetch failed: {e}")
+            return
+
+        if not markets:
+            await update.message.reply_text(
+                "📭 No active BTC 5-min markets found right now\\.\n"
+                "Markets are only available during active 5-minute windows\\.",
+                parse_mode="MarkdownV2",
+            )
+            return
+
+        lines = ["📊 *Active BTC 5-Min Markets*\n━━━━━━━━━━━━━━━━━━━━━━━━"]
+        for i, m in enumerate(markets[:10], 1):
+            time_left = m.resolution_time - __import__("datetime").datetime.now(
+                __import__("datetime").timezone.utc
+            )
+            secs = max(0, int(time_left.total_seconds()))
+            mins, s = divmod(secs, 60)
+            edge_pct = float(m.edge) * 100
+            edge_icon = "🟢" if edge_pct >= 2 else ("🟡" if edge_pct >= 0.5 else "⚪")
+            vol_k = float(m.volume_24hr) / 1000
+
+            lines.append(
+                f"\n`{i}.` *{m.title[:55].replace('?', '').strip()}*\n"
+                f"   YES `${float(m.yes_price):.3f}` · NO `${float(m.no_price):.3f}` · "
+                f"Sum `{float(m.sum_price):.3f}`\n"
+                f"   {edge_icon} Edge `{edge_pct:.2f}%` · "
+                f"Vol₂₄ `${vol_k:.1f}k` · Expires `{mins}m {s}s`"
+            )
+
+        lines.append(
+            f"\n\n_Showing {min(len(markets), 10)} of {len(markets)} markets\\. "
+            "Use /scan for arbitrage opportunities\\._"
+        )
+
+        text = "\n".join(lines)
+        # Telegram max is 4096 chars
+        if len(text) > 4000:
+            text = text[:4000] + "\n_…truncated_"
+
+        await update.message.reply_text(text, parse_mode="MarkdownV2")
+
+    async def cmd_price(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """
+        /price — Real-time BTC spot price from multiple sources with 24h stats.
+        """
+        user = update.effective_user
+        if not self._authorize(user):
+            return
+
+        # Import or use existing price feed
+        try:
+            from price_feed import PriceFeed
+        except ImportError:
+            try:
+                from bot.price_feed import PriceFeed
+            except ImportError:
+                await update.message.reply_text("❌ PriceFeed module not available")
+                return
+
+        pf = PriceFeed()
+        try:
+            price = await pf.get_btc_price()
+            await pf._refresh_24h()   # force immediate 24h stats refresh
+            stats = pf.stats
+            await pf.close()
+        except Exception as e:
+            await update.message.reply_text(f"❌ Price fetch failed: {e}")
+            return
+
+        chg = stats["change_24h"]
+        chg_icon = "📈" if chg >= 0 else "📉"
+        chg_str  = f"{chg:+.2f}%"
+
+        msg = (
+            "₿ *Bitcoin \\(BTC/USD\\) — Live*\n"
+            "━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"*Price:* `${float(price):,.2f}`\n\n"
+            f"*24h Change:* {chg_icon} `{chg_str}`\n"
+            f"*24h High:*  `${stats['high_24h']:,.2f}`\n"
+            f"*24h Low:*   `${stats['low_24h']:,.2f}`\n"
+            f"*Vol 24h:*   `${stats['volume_24h_usd'] / 1e9:.2f}B`\n\n"
+            f"*Sigma \\(vol proxy\\):* `${stats['sigma_usd']:,.0f}`\n"
+            f"_Sources: Binance → Kraken → CoinGecko → CoinCap_"
+        )
+        await update.message.reply_text(msg, parse_mode="MarkdownV2")
+
+    async def cmd_scan(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """
+        /scan — Scan all markets for arbitrage opportunities.
+        Finds markets where YES + NO < target sum (e.g. 0.96).
+        """
+        user = update.effective_user
+        if not self._authorize(user):
+            return
+
+        await update.message.reply_text("🔍 Scanning markets for arbitrage opportunities…")
+
+        try:
+            markets = await self.clob.discover_markets()
+        except Exception as e:
+            await update.message.reply_text(f"❌ Scan failed: {e}")
+            return
+
+        threshold = float(config.TARGET_SUM) if hasattr(config, "TARGET_SUM") else 0.96
+        arb_markets = [m for m in markets if float(m.sum_price) < threshold]
+        arb_markets.sort(key=lambda m: float(m.edge), reverse=True)
+
+        if not arb_markets:
+            await update.message.reply_text(
+                f"🔍 *Arbitrage Scan Complete*\n\n"
+                f"No opportunities found \\(target sum \\< {threshold}\\)\\.\n"
+                f"Scanned {len(markets)} active markets\\.",
+                parse_mode="MarkdownV2",
+            )
+            return
+
+        lines = [f"🎯 *{len(arb_markets)} Arbitrage Opportunities Found\\!*\n━━━━━━━━━━━━━━━━━━━━━"]
+        for i, m in enumerate(arb_markets[:5], 1):
+            edge_pct = float(m.edge) * 100
+            profit_10 = edge_pct / 100 * 10  # profit on $10
+            lines.append(
+                f"\n`{i}.` `{m.title[:50]}`\n"
+                f"   YES `{float(m.yes_price):.3f}` \\+ NO `{float(m.no_price):.3f}` "
+                f"= `{float(m.sum_price):.4f}`\n"
+                f"   Edge `{edge_pct:.2f}%` · Profit on \\$10: `\\${profit_10:.3f}`"
+            )
+        lines.append(
+            f"\n_Sum target: {threshold}\\. Use /markets for full list\\._"
+        )
+        await update.message.reply_text("\n".join(lines), parse_mode="MarkdownV2")
+
+    async def cmd_book(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """
+        /book <token_id> — Fetch CLOB order book for a specific token.
+        Example: /book 0x1234...
+        """
+        user = update.effective_user
+        if not self._authorize(user):
+            return
+
+        if not context.args:
+            await update.message.reply_text(
+                "❌ Usage: `/book <token_id>`\n"
+                "Get token IDs from /markets",
+                parse_mode="MarkdownV2",
+            )
+            return
+
+        token_id = context.args[0].strip()
+        snap = await self.clob.get_order_book(token_id)
+
+        if not snap:
+            await update.message.reply_text("❌ Could not fetch order book\\. Check the token ID\\.", parse_mode="MarkdownV2")
+            return
+
+        spread_pct = float(snap.spread) * 100
+        msg = (
+            f"📖 *Order Book*\n"
+            f"Token: `{token_id[:20]}…`\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"*Best Ask \\(buy at\\):* `{float(snap.best_ask):.4f}` "
+            f"\\({float(snap.ask_size):.1f} shares\\)\n"
+            f"*Mid Price:*         `{float(snap.mid_price):.4f}`\n"
+            f"*Best Bid \\(sell at\\):* `{float(snap.best_bid):.4f}` "
+            f"\\({float(snap.bid_size):.1f} shares\\)\n\n"
+            f"*Spread:* `{spread_pct:.2f}%`\n"
+            f"_Updated: {snap.timestamp.strftime('%H:%M:%S UTC')}_"
+        )
+        await update.message.reply_text(msg, parse_mode="MarkdownV2")
 
     async def stop_bot(self):
         """Stop the Telegram bot."""

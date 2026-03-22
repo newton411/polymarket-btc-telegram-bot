@@ -1,30 +1,31 @@
-# ── Core Async & HTTP ──────────────────────────────────────────────────────
+# ── Core async HTTP ─────────────────────────────────────────────────────────
 aiohttp>=3.9.0
 
-# ── Telegram Bot ────────────────────────────────────────────────────────────
-python-telegram-bot[rate-limiter]>=21.0
+# ── Telegram bot ─────────────────────────────────────────────────────────────
+python-telegram-bot[job-queue]>=21.0
 
-# ── Polymarket CLOB Client (Official) ───────────────────────────────────────
-# Install: pip install git+https://github.com/Polymarket/py-clob-client.git
-# Or download wheel from releases: https://github.com/Polymarket/py-clob-client/releases
+# ── Polymarket CLOB client (official SDK) ────────────────────────────────────
+# Install manually: pip install py-clob-client
+# GitHub: https://github.com/Polymarket/py-clob-client
+# Required for: order placement, balance check, API key derivation
+# Implements the RobotTraders notebook auth pattern:
+#   auth_client = ClobClient(CLOB_API, key=PK, chain_id=137, funder=ADDRESS)
+#   creds = auth_client.derive_api_key()
+#   auth_client.set_api_creds(creds)
+# py-clob-client>=0.17.0   (uncomment after manual install)
 
-# ── Price Feed (Binance BTC via CCXT) ───────────────────────────────────────
-ccxt>=4.0.0
-
-# ── Environment & Config ────────────────────────────────────────────────────
+# ── Environment & config ─────────────────────────────────────────────────────
 python-dotenv>=1.0.0
 
-# ── Retry Logic & Resilience ───────────────────────────────────────────────
+# ── Retry logic ──────────────────────────────────────────────────────────────
 tenacity>=8.2.3
 
-# ── Cryptography & Web3 (for signing on Polygon) ────────────────────────────
-web3>=6.0.0
-eth-account>=0.10.0
-
-# ── HTTP Requests (fallback/utility) ────────────────────────────────────────
+# ── HTTP (sync fallback, used in some utilities) ─────────────────────────────
 requests>=2.31.0
 
-# ── Optional: Stats & Analysis ──────────────────────────────────────────────
-numpy>=1.26.0  # For statistics
-pandas>=2.1.0  # For data handling
-scipy>=1.11.0  # For advanced math
+# ── Numerical / statistics ───────────────────────────────────────────────────
+numpy>=1.26.0
+pandas>=2.1.0
+
+# ── Web3 / Polygon (for CLOB wallet signing) ─────────────────────────────────
+# web3>=6.0.0   (uncomment when using live trading)

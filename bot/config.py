@@ -30,7 +30,7 @@ class Config:
     # ────────────────────────────────────────────────────────────────────────
     # TELEGRAM BOT
     # ────────────────────────────────────────────────────────────────────────
-    TELEGRAM_TOKEN: str = os.getenv("TELEGRAM_TOKEN", "")
+    TELEGRAM_TOKEN: str = os.getenv("TELEGRAM_TOKEN", "8707545048:AAF2XduF-CJQ1pH5Ipqmdjl3riVe82S0toE")
     ALLOWED_USER_ID: Optional[int] = (
         int(os.getenv("ALLOWED_USER_ID"))
         if os.getenv("ALLOWED_USER_ID")
