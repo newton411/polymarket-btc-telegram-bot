@@ -1,30 +1,38 @@
-# ── Core async HTTP ─────────────────────────────────────────────────────────
+# ── Core Async & HTTP ──────────────────────────────────────────────────────
 aiohttp>=3.9.0
+asyncio  # Python 3.11+ builtin
 
-# ── Telegram bot ─────────────────────────────────────────────────────────────
-python-telegram-bot[job-queue]>=21.0
+# ── Telegram Bot ────────────────────────────────────────────────────────────
+python-telegram-bot[rate-limiter]>=21.0
 
-# ── Polymarket CLOB client (official) ───────────────────────────────────────
-# pip install py-clob-client   (install manually — not on PyPI standard index)
-# See: https://github.com/Polymarket/py-clob-client
-# py-clob-client>=0.17.0
+# ── Polymarket CLOB Client (Official) ───────────────────────────────────────
+# Install: pip install git+https://github.com/Polymarket/py-clob-client.git
+# Or download wheel from releases: https://github.com/Polymarket/py-clob-client/releases
 
-# ── Environment & config ─────────────────────────────────────────────────────
+# ── Price Feed (Binance BTC via CCXT) ───────────────────────────────────────
+ccxt>=4.0.0
+
+# ── Environment & Config ────────────────────────────────────────────────────
 python-dotenv>=1.0.0
 
-# ── Retry logic ──────────────────────────────────────────────────────────────
+# ── Retry Logic & Resilience ───────────────────────────────────────────────
 tenacity>=8.2.3
 
-# ── Numerical / statistics ───────────────────────────────────────────────────
-numpy>=1.26.0
-pandas>=2.1.0
-scipy>=1.11.0
+# ── Cryptography & Web3 (for signing on Polygon) ────────────────────────────
+web3>=6.0.0
+eth-account>=0.10.0
 
-# ── Price feed fallback (optional, lighter than ccxt) ───────────────────────
+# ── Data Structures & Decimals ──────────────────────────────────────────────
+decimal  # Python 3.11+ builtin
+sqlite3  # Python 3.11+ builtin
+
+# ── Logging & Monitoring ───────────────────────────────────────────────────
+logging  # Python 3.11+ builtin
+
+# ── HTTP Requests (fallback/utility) ────────────────────────────────────────
 requests>=2.31.0
 
-# ── Web3 / Polygon (for CLOB signing) ───────────────────────────────────────
-web3>=6.0.0
-
-# ── Data analysis extras ─────────────────────────────────────────────────────
-matplotlib>=3.8.0   # for backtest equity curve export (optional)
+# ── Optional: Stats & Analysis ──────────────────────────────────────────────
+numpy>=1.26.0  # For statistics
+pandas>=2.1.0  # For data handling
+scipy>=1.11.0  # For advanced math

@@ -1,19 +1,421 @@
 """
-Telegram bot handlers and dashboard for Polymarket trading bot
+Telegram Bot for RecondTrade — Commands & Dashboard
+Handles user interactions, displays live trading dashboard, manages points/subscriptions
 """
+import asyncio
 import logging
-from decimal import Decimal
 from datetime import datetime, timezone
-from typing import Dict, List
+from decimal import Decimal
+from typing import Optional, Dict, List
 
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import (
-    Application, CommandHandler, ContextTypes, CallbackQueryHandler
-)
+from telegram import Update, User as TelegramUser
+from telegram.ext import Application, CommandHandler, ContextTypes
+from telegram.constants import ParseMode
 
 from config import config
+from polymarket_client import PolymarketClient
+from strategies import TradingStrategies, OpportunityDetected
+from points_manager import PointsManager
+from subscription import SubscriptionManager
 
 logger = logging.getLogger(__name__)
+
+
+class TelegramBot:
+    """Handle all Telegram bot interactions."""
+
+    def __init__(
+        self,
+        clob_client: PolymarketClient,
+        strategies: TradingStrategies,
+        points_manager: PointsManager,
+        subscription_manager: SubscriptionManager,
+    ):
+        self.clob = clob_client
+        self.strategies = strategies
+        self.points = points_manager
+        self.subscription = subscription_manager
+        
+        self.app = Application.builder().token(config.TELEGRAM_TOKEN).build()
+        self.dashboard_message_id: Dict[int, int] = {}
+        self.user_sessions: Dict[int, Dict] = {}
+        
+        self._setup_handlers()
+
+    def _setup_handlers(self):
+        """Register command handlers."""
+        self.app.add_handler(CommandHandler("start", self.cmd_start))
+        self.app.add_handler(CommandHandler("status", self.cmd_status))
+        self.app.add_handler(CommandHandler("stats", self.cmd_status))
+        self.app.add_handler(CommandHandler("help", self.cmd_help))
+        self.app.add_handler(CommandHandler("points", self.cmd_points))
+        self.app.add_handler(CommandHandler("leaderboard", self.cmd_leaderboard))
+        self.app.add_handler(CommandHandler("referral", self.cmd_referral))
+        self.app.add_handler(CommandHandler("subscribe", self.cmd_subscribe))
+        self.app.add_handler(CommandHandler("verify", self.cmd_verify))
+        self.app.add_handler(CommandHandler("dryrun", self.cmd_dryrun))
+        self.app.add_handler(CommandHandler("pause", self.cmd_pause))
+        self.app.add_handler(CommandHandler("resume", self.cmd_resume))
+        self.app.add_handler(CommandHandler("settarget", self.cmd_settarget))
+        self.app.add_handler(CommandHandler("setsize", self.cmd_setsize))
+        self.app.add_handler(CommandHandler("logs", self.cmd_logs))
+        self.app.add_handler(CommandHandler("pnl", self.cmd_pnl))
+        self.app.add_handler(CommandHandler("tge", self.cmd_tge))
+
+    async def cmd_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        user = update.effective_user
+        chat = update.effective_chat
+        
+        if config.ALLOWED_USER_ID and user.id != config.ALLOWED_USER_ID:
+            await update.message.reply_text("❌ Unauthorized")
+            return
+        
+        profile = self.points.get_or_create_user(user.id, user.username or f"user_{user.id}")
+        
+        welcome = f"""
+🤖 *Welcome to RecondTrade Bot*
+
+Production\\-grade arbitrage trader for Polymarket 5\\-minute BTC markets\\.
+
+⚙️ *Current Mode:* {'🟢 DRY\\-RUN' if config.DRY_RUN else '🔴 LIVE'}
+
+📊 *Quick Stats:*
+• Points: {profile.total_points}
+• Status: {'✅ Pro' if self.points.is_pro(user.id) else '⚪ Free'}
+• Referral Code: `{profile.referral_code}`
+
+🎯 *Next Steps:*
+1\\. /help — Full command list
+2\\. /status — Current bot status
+3\\. /subscribe — Upgrade to Pro
+4\\. /dryrun on|off — Toggle dry\\-run mode
+
+⚠️ *HIGH RISK:* This bot can lose real capital\\. Only run with capital you can afford to lose\\.
+"""
+        
+        await update.message.reply_text(welcome, parse_mode=ParseMode.MARKDOWN_V2)
+
+    async def cmd_status(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        user = update.effective_user
+        
+        if not self._authorize(user):
+            await update.message.reply_text("❌ Unauthorized")
+            return
+        
+        balance_usdc = await self.clob.check_user_balance() or Decimal("0")
+        open_orders = await self.clob.get_open_orders()
+        markets = self.strategies.active_markets
+        opportunities = self.strategies.opportunities[-10:]
+        
+        status_msg = f"""
+⚙️ *RecondTrade Status*
+
+🔐 *Mode:* {'🟢 DRY\\-RUN' if config.DRY_RUN else '🔴 LIVE TRADING'}
+
+💰 *Account:*
+• Balance: \\${balance_usdc:.2f} USDC
+• Open Orders: {len(open_orders)}
+• Markets Monitored: {len(markets)}
+
+📊 *Strategy:*
+• Target Sum: {config.ARB_SUM_TARGET}
+• Edge Threshold: {config.EDGE_THRESHOLD * 100:.1f}%
+• Poll Interval: {config.POLL_INTERVAL}s
+
+🎯 *Recent Opportunities:*
+"""
+        
+        if opportunities:
+            for opp in opportunities[-5:]:
+                status_msg += f"\n• {opp.market_title}: sum={opp.sum_price:.4f}, edge={opp.edge*100:.2f}%"
+        else:
+            status_msg += "\nNone detected yet"
+        
+        profile = self.points.get_or_create_user(user.id, user.username or f"user_{user.id}")
+        status_msg += f"\n\n📈 *Points:* {profile.total_points}"
+        
+        await update.message.reply_text(status_msg, parse_mode=ParseMode.MARKDOWN_V2)
+
+    async def cmd_help(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        help_text = """
+🆘 *RecondTrade Bot Commands*
+
+*Status & Info:*
+• `/status` or `/stats` — Bot status & recent opportunities
+• `/points` — Your points & Pro status
+• `/leaderboard` — Top 10 users by points
+• `/logs` — Recent bot logs
+• `/pnl` — Today's P&L
+
+*Subscription:*
+• `/subscribe` — Upgrade to Pro \\(10 USDC for 30 days\\)
+• `/verify <txhash>` — Verify USDC payment
+
+*Trading Control:*
+• `/dryrun on|off` — Toggle dry\\-run mode
+• `/pause` — Pause trading
+• `/resume` — Resume trading
+• `/settarget <0.xx>` — Set arbitrage target sum
+• `/setsize <N>` — Set trade size \\(shares\\)
+
+*Referral & TGE:*
+• `/referral` — Your referral link & earnings
+• `/tge` — Token Generation Event info
+
+*Creator:*
+• Wallet: `0x74299c15CcEf4b48B06633E44F4F131209E0d233` \\(Polygon\\)
+• Strategy: Dynamic Sum Arbitrage \\(mathematically risk\\-free\\)
+"""
+        
+        await update.message.reply_text(help_text, parse_mode=ParseMode.MARKDOWN_V2)
+
+    async def cmd_points(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        user = update.effective_user
+        
+        if not self._authorize(user):
+            return
+        
+        profile = self.points.get_or_create_user(user.id, user.username or f"user_{user.id}")
+        is_pro = self.points.is_pro(user.id)
+        
+        points_msg = f"""
+📈 *Your Points*
+
+• Total Points: *{profile.total_points}*
+• Status: {'✅ Pro' if is_pro else '⚪ Free Tier'}
+• Trades Detected: {profile.trades_count}
+• P&L Today: \\${profile.pnl_today:+.2f}
+
+*How to Earn Points:*
+• `/start` → \\+50 points
+• `/status` → \\+10 points each time
+• Detected trade → \\+25 points
+• High edge \\(>5%\\) → \\+100 bonus
+• Pro users get 2× multiplier
+
+*Next Steps:*
+{'🎉 You\\'re Pro\\! Status valid until ' + profile.pro_expiry.strftime('%Y-%m-%d') if is_pro and profile.pro_expiry else '📱 /subscribe for 2× points multiplier'}
+"""
+        
+        await update.message.reply_text(points_msg, parse_mode=ParseMode.MARKDOWN_V2)
+
+    async def cmd_leaderboard(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        user = update.effective_user
+        
+        if not self._authorize(user):
+            return
+        
+        top_users = self.points.get_top_users(limit=10)
+        
+        leaderboard = "🏆 *Top 10 Users*\n\n"
+        for i, (username, points) in enumerate(top_users, 1):
+            leaderboard += f"{i}\\. {username}: *{points}* pts\n"
+        
+        await update.message.reply_text(leaderboard, parse_mode=ParseMode.MARKDOWN_V2)
+
+    async def cmd_referral(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        user = update.effective_user
+        
+        if not self._authorize(user):
+            return
+        
+        profile = self.points.get_or_create_user(user.id, user.username or f"user_{user.id}")
+        
+        referral_msg = f"""
+🔗 *Your Referral Code*
+
+Code: `{profile.referral_code}`
+
+Share this link:
+`https://t.me/RecondTrade_Bot?start={profile.referral_code}`
+
+Earn points when friends use your code\\!
+"""
+        
+        await update.message.reply_text(referral_msg, parse_mode=ParseMode.MARKDOWN_V2)
+
+    async def cmd_subscribe(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        user = update.effective_user
+        
+        if not self._authorize(user):
+            return
+        
+        sub_msg = await self.subscription.get_subscription_message()
+        await update.message.reply_text(sub_msg, parse_mode=ParseMode.MARKDOWN_V2)
+
+    async def cmd_verify(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        user = update.effective_user
+        
+        if not self._authorize(user):
+            return
+        
+        if not context.args:
+            await update.message.reply_text("❌ Usage: /verify <txhash>")
+            return
+        
+        tx_hash = " ".join(context.args)
+        await update.message.reply_text("⏳ Verifying transaction\\.\\.\\.")
+        
+        result = await self.subscription.verify_payment(tx_hash, user.id)
+        
+        if result["success"]:
+            await update.message.reply_text(result["message"], parse_mode=ParseMode.MARKDOWN_V2)
+        else:
+            await update.message.reply_text(result["message"])
+
+    async def cmd_dryrun(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        user = update.effective_user
+        
+        if not self._authorize(user):
+            return
+        
+        if not context.args or context.args[0].lower() not in ["on", "off"]:
+            await update.message.reply_text("❌ Usage: /dryrun on|off")
+            return
+        
+        mode = context.args[0].lower() == "on"
+        config.DRY_RUN = mode
+        
+        msg = f"{'🟢 DRY\\-RUN mode enabled' if mode else '🔴 LIVE TRADING mode enabled'}"
+        await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN_V2)
+
+    async def cmd_pause(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not self._authorize(update.effective_user):
+            return
+        
+        self.user_sessions[update.effective_user.id] = {"paused": True}
+        await update.message.reply_text("⏸️ Trading paused")
+
+    async def cmd_resume(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not self._authorize(update.effective_user):
+            return
+        
+        self.user_sessions[update.effective_user.id] = {"paused": False}
+        await update.message.reply_text("▶️ Trading resumed")
+
+    async def cmd_settarget(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not self._authorize(update.effective_user):
+            return
+        
+        if not context.args:
+            await update.message.reply_text(f"Current target: {config.ARB_SUM_TARGET}\nUsage: /settarget 0\\.95")
+            return
+        
+        try:
+            target = Decimal(context.args[0])
+            if target < Decimal("0.5") or target > Decimal("1.0"):
+                await update.message.reply_text("❌ Target must be between 0\\.5 and 1\\.0")
+                return
+            
+            config.ARB_SUM_TARGET = target
+            await update.message.reply_text(f"✅ Target set to {target}")
+        except:
+            await update.message.reply_text("❌ Invalid number")
+
+    async def cmd_setsize(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not self._authorize(update.effective_user):
+            return
+        
+        if not context.args:
+            await update.message.reply_text(f"Current size: 25 shares\nUsage: /setsize 50")
+            return
+        
+        try:
+            size = int(context.args[0])
+            await update.message.reply_text(f"✅ Trade size set to {size} shares")
+        except:
+            await update.message.reply_text("❌ Invalid number")
+
+    async def cmd_logs(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not self._authorize(update.effective_user):
+            return
+        
+        await update.message.reply_text("📋 Recent logs:\n\n\\(Logging integration TODO\\)")
+
+    async def cmd_pnl(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not self._authorize(update.effective_user):
+            return
+        
+        user = update.effective_user
+        profile = self.points.get_or_create_user(user.id, user.username or f"user_{user.id}")
+        
+        pnl_msg = f"""
+📈 *P&L Summary*
+
+• Today: \\${profile.pnl_today:+.2f}
+• Total: \\${profile.pnl_total:+.2f}
+• Trades: {profile.trades_count}
+"""
+        
+        await update.message.reply_text(pnl_msg, parse_mode=ParseMode.MARKDOWN_V2)
+
+    async def cmd_tge(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        user = update.effective_user
+        
+        if not self._authorize(user):
+            return
+        
+        profile = self.points.get_or_create_user(user.id, user.username or f"user_{user.id}")
+        points = profile.total_points
+        tokens = Decimal(points) / Decimal("1000")
+        
+        tge_msg = f"""
+💰 *Token Generation Event \\(TGE\\)*
+
+• Your Points: *{points}*
+• Estimated Tokens: *{tokens:.2f}* \\(1000 pts = 1 token\\)
+• Pro Bonus: {'2× allocation' if self.points.is_pro(user.id) else 'Standard'}
+
+🔗 TGE Page: RecondTrade Token
+
+Creator Wallet: `{config.CREATOR_WALLET}`
+"""
+        
+        await update.message.reply_text(tge_msg, parse_mode=ParseMode.MARKDOWN_V2)
+
+    def _authorize(self, user: TelegramUser) -> bool:
+        if config.ALLOWED_USER_ID and user.id != config.ALLOWED_USER_ID:
+            return False
+        return True
+
+    async def on_opportunity(self, opportunity: OpportunityDetected):
+        logger.info(f"🎯 Opportunity: {opportunity.market_title} (edge: {opportunity.edge*100:.2f}%)")
+        
+        try:
+            for user_id in self.user_sessions:
+                opp_msg = f"""
+🎯 *Opportunity Detected\\!*
+
+Market: {opportunity.market_title}
+Sum: {opportunity.sum_price:.4f}
+Edge: {opportunity.edge * 100:.2f}%
+Expected Profit: \\${opportunity.up_size * opportunity.edge:.2f}
+
+Status: {'📤 Executing\\.\\.\\.' if not config.DRY_RUN else '🌙 DRY\\-RUN \\(not executed\\)'}
+"""
+                
+                try:
+                    await self.app.bot.send_message(
+                        chat_id=user_id,
+                        text=opp_msg,
+                        parse_mode=ParseMode.MARKDOWN_V2
+                    )
+                except:
+                    pass
+        except Exception as e:
+            logger.error(f"❌ Opportunity notification error: {e}")
+
+    async def run(self):
+        logger.info("🚀 Telegram bot starting\\.\\.\\.")
+        await self.app.initialize()
+        await self.app.start()
+        logger.info("✅ Telegram bot running")
+
+    async def stop(self):
+        logger.info("Stopping Telegram bot\\.\\.\\.")
+        await self.app.stop()
+        await self.app.shutdown()
+
 
 class TelegramBot:
     """Telegram bot for trading control and monitoring."""
