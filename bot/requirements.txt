@@ -1,6 +1,5 @@
 # ── Core Async & HTTP ──────────────────────────────────────────────────────
 aiohttp>=3.9.0
-asyncio  # Python 3.11+ builtin
 
 # ── Telegram Bot ────────────────────────────────────────────────────────────
 python-telegram-bot[rate-limiter]>=21.0
@@ -21,13 +20,6 @@ tenacity>=8.2.3
 # ── Cryptography & Web3 (for signing on Polygon) ────────────────────────────
 web3>=6.0.0
 eth-account>=0.10.0
-
-# ── Data Structures & Decimals ──────────────────────────────────────────────
-decimal  # Python 3.11+ builtin
-sqlite3  # Python 3.11+ builtin
-
-# ── Logging & Monitoring ───────────────────────────────────────────────────
-logging  # Python 3.11+ builtin
 
 # ── HTTP Requests (fallback/utility) ────────────────────────────────────────
 requests>=2.31.0

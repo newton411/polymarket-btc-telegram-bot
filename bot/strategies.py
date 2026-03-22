@@ -297,9 +297,7 @@ class TradingStrategies:
         """Start all background monitoring tasks."""
         # Start Binance price feed
         asyncio.create_task(self.binance.poll_continuously(interval_seconds=1.0))
-
         # Start opportunity detection
         asyncio.create_task(self.run_detection_loop())
 
         logger.info("🚀 Background tasks started")
-            return False

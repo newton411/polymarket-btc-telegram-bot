@@ -178,6 +178,11 @@ Production\\-grade arbitrage trader for Polymarket 5\\-minute BTC markets\\.
         profile = self.points.get_or_create_user(user.id, user.username or f"user_{user.id}")
         is_pro = self.points.is_pro(user.id)
         
+        if is_pro and profile.pro_expiry:
+            next_steps = "🎉 You're Pro! Status valid until " + profile.pro_expiry.strftime('%Y-%m-%d')
+        else:
+            next_steps = '📱 /subscribe for 2× points multiplier'
+        
         points_msg = f"""
 📈 *Your Points*
 
@@ -194,7 +199,7 @@ Production\\-grade arbitrage trader for Polymarket 5\\-minute BTC markets\\.
 • Pro users get 2× multiplier
 
 *Next Steps:*
-{'🎉 You\\'re Pro\\! Status valid until ' + profile.pro_expiry.strftime('%Y-%m-%d') if is_pro and profile.pro_expiry else '📱 /subscribe for 2× points multiplier'}
+{next_steps}
 """
         
         await update.message.reply_text(points_msg, parse_mode=ParseMode.MARKDOWN_V2)
