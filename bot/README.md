@@ -1,127 +1,174 @@
-# RecondTrade Bot — Polymarket BTC HFT
+# RecondTrade Bot
 
-A production-grade Polymarket arbitrage bot for 5-minute BTC Up/Down markets, with Telegram dashboard, real-time Gamma API data, and CLOB order placement.
+**Production-ready Polymarket BTC arbitrage bot with Telegram dashboard, points system, and Pro subscriptions.**
 
-## Architecture
+---
+
+## What It Does
+
+- Scans Polymarket's 5-minute BTC Up/Down markets every **2 seconds**
+- Triggers when `YES_ask + NO_ask ≤ 0.95` (configurable)
+- Buys **25 shares on both legs** simultaneously (Dynamic Sum Arbitrage)
+- Maintains a live **Telegram dashboard** (auto-updated every 15s)
+- Awards **$RCDT points** for every detected opportunity
+- Supports **Pro subscriptions** via Polygon MATIC payment
+- **Dry-run mode ON by default** — no real money at risk until you're ready
+
+---
+
+## Quick Start (Termux on Android)
+
+```bash
+# 1. Install Termux from F-Droid (not Play Store)
+
+# 2. Update packages
+pkg update && pkg upgrade -y
+
+# 3. Install Python and git
+pkg install python git -y
+
+# 4. Clone the repo
+git clone https://github.com/newton411/polymarket-btc-telegram-bot.git
+cd polymarket-btc-telegram-bot/bot
+
+# 5. Install Python dependencies
+pip install python-telegram-bot aiohttp python-dotenv
+
+# 6. (Optional) Install py-clob-client for LIVE order placement
+pip install py-clob-client
+
+# 7. Copy and edit your .env file
+cp .env.example .env
+nano .env    # or: vim .env
+
+# 8. Run the bot
+python bot.py
+```
+
+---
+
+## Required .env Values
+
+| Variable | Required | Description |
+|---|---|---|
+| `TELEGRAM_TOKEN` | ✅ | From @BotFather |
+| `ALLOWED_USER_ID` | ✅ | Your Telegram user ID (from @userinfobot) |
+| `POLYMARKET_ADDRESS` | ✅ (for Pro payments) | Polygon wallet for subscriptions |
+| `POLYMARKET_PRIVATE_KEY` | Live only | Polygon wallet private key |
+| `DRY_RUN` | — | `true` (default) or `false` |
+
+---
+
+## Commands
+
+### General
+| Command | Description |
+|---|---|
+| `/start` | Launch bot, pin dashboard, earn 100 welcome points |
+| `/status` | Snapshot of the live dashboard |
+| `/stats` | Your personal trade stats and points |
+| `/points` | Points balance and multiplier |
+| `/leaderboard` | Top 10 traders by points |
+| `/referral` | Your referral link (earn 250 pts per friend) |
+| `/pnl` | P&L summary |
+| `/tge` | Token Generation Event info |
+
+### Subscription
+| Command | Description |
+|---|---|
+| `/subscribe` | Show Pro payment wallet and instructions |
+| `/verify <txhash>` | Submit your Polygon tx to activate Pro |
+
+### Owner-Only (ALLOWED_USER_ID)
+| Command | Description |
+|---|---|
+| `/pause` | Pause the trading engine |
+| `/resume` | Resume trading |
+| `/dryrun on\|off` | Toggle dry-run mode |
+| `/settarget 0.95` | Change the arb target sum |
+| `/setsize 25` | Change shares per leg |
+| `/scan` | Manual one-shot market scan |
+| `/markets` | List active BTC 5-min markets |
+| `/logs` | Show last 20 log lines |
+
+---
+
+## Trading Strategy: Dynamic Sum Arbitrage
+
+```
+When YES_ask + NO_ask ≤ TARGET_SUM:
+
+  BUY SIZE shares of YES at YES_ask  (GTC, post-only)
+  BUY SIZE shares of NO  at NO_ask   (GTC, post-only)
+
+  Cost   = sum * SIZE   (e.g. 0.94 × 25 = $23.50)
+  Payout = 1.00 * SIZE  (one leg always wins  = $25.00)
+  Edge   = (1 - sum) * SIZE  = $1.50
+```
+
+The strategy is **market-neutral** — it doesn't matter whether BTC goes up or down.
+
+---
+
+## Points System
+
+| Action | Points |
+|---|---|
+| First `/start` | +100 |
+| Each trade detected | +10 (×2 with Pro) |
+| Refer a friend | +250 |
+| New user from referral | +50 |
+| Activate Pro | +500 |
+| Visit `/tge` | +25 |
+
+---
+
+## Pro Subscription
+
+1. Run `/subscribe` → bot shows the creator wallet address
+2. Send **5 MATIC** on Polygon to that address
+3. Copy the transaction hash
+4. Run `/verify <txhash>` → bot verifies on Polygonscan and activates Pro
+
+**Pro benefits:** ×2 points multiplier · Priority alerts · TGE allocation · 30-day validity
+
+---
+
+## File Structure
 
 ```
 bot/
-├── main.py              # Entry point — orchestrates all components
-├── config.py            # Config & environment validation
-├── polymarket_client.py # Gamma API + CLOB client (RobotTraders patterns)
-├── price_feed.py        # Multi-source BTC price (Binance/Kraken/CoinGecko/CoinCap)
-├── strategies.py        # Dynamic Sum Arbitrage strategy engine
-├── telegram_bot.py      # Full Telegram dashboard + commands
-├── backtest.py          # Historical backtesting engine
-├── points_manager.py    # Points & leaderboard system
-├── subscription.py      # Pro subscription management
-└── utils.py             # Logging, validation helpers
+├── bot.py          ← SINGLE-FILE production bot (run this)
+├── .env.example    ← Copy to .env
+├── tge.html        ← TGE landing page (auto-generated)
+├── points.db       ← SQLite database (auto-created)
+├── bot.log         ← Log file (auto-created)
+│
+│   (Legacy multi-file bot — kept for reference)
+├── main.py
+├── config.py
+├── polymarket_client.py
+├── strategies.py
+├── telegram_bot.py
+├── price_feed.py
+├── points_manager.py
+├── subscription.py
+└── utils.py
 ```
 
-## Polymarket API Integration
+---
 
-Based on [RobotTraders/bits_and_bobs](https://github.com/RobotTraders/bits_and_bobs/blob/main/polymarket_python.ipynb):
+## Safety Notes
 
-| API | Purpose | Auth |
-|-----|---------|------|
-| `gamma-api.polymarket.com/markets` | Market discovery, prices | None |
-| `clob.polymarket.com/book` | Real-time order book | None |
-| `clob.polymarket.com` + py-clob-client | Order placement | Private key |
-| `data-api.polymarket.com/positions` | User positions | None |
+- **Never share your private key.** It's only used locally to sign orders.
+- Keep `DRY_RUN=true` until you've verified the bot is working correctly.
+- Set a realistic `DAILY_DRAWDOWN_STOP` (default 10%) to limit losses.
+- Polymarket requires KYC-free participation but check your local regulations.
 
-### Key Pattern (from RobotTraders notebook)
+---
 
-```python
-from py_clob_client.client import ClobClient
+## License
 
-# Read-only (no auth)
-client = ClobClient("https://clob.polymarket.com")
-book   = client.get_order_book(yes_token_id)
-mid    = client.get_midpoint(yes_token_id)   # {"mid": "0.62"}
-spread = client.get_spread(yes_token_id)     # {"spread": "0.02"}
+MIT — use at your own risk. This is not financial advice.
 
-# Authenticated (for orders)
-auth_client = ClobClient(CLOB_API, key=PK, chain_id=137, funder=ADDRESS)
-creds = auth_client.derive_api_key()
-auth_client.set_api_creds(creds)
-
-# Get clobTokenIds from Gamma API (JSON string field)
-import json
-token_ids = json.loads(market['clobTokenIds'])
-yes_token_id = token_ids[0]
-no_token_id  = token_ids[1]
-```
-
-## Setup
-
-### 1. Install dependencies
-
-```bash
-cd bot
-pip install -r requirements.txt
-
-# Install py-clob-client (not on standard PyPI)
-pip install py-clob-client
-```
-
-### 2. Configure environment
-
-```bash
-cp .env.example .env
-# Edit .env with your values
-```
-
-**Required for DRY_RUN (read-only):**
-- `TELEGRAM_TOKEN` — from @BotFather
-- `ALLOWED_USER_ID` — your Telegram user ID from @userinfobot
-
-**Required for LIVE trading:**
-- `POLYMARKET_PRIVATE_KEY` — your Polygon wallet private key
-- `POLYMARKET_ADDRESS` — your wallet address (`0xc7b9...`)
-
-### 3. Run
-
-```bash
-cd bot
-python main.py
-```
-
-## Telegram Commands
-
-| Command | Description |
-|---------|-------------|
-| `/start` | Main menu |
-| `/status` | Bot status & recent opportunities |
-| `/markets` | **Live** BTC 5-min markets from Gamma API |
-| `/price` | Real-time BTC price (4 sources) |
-| `/scan` | Scan for arbitrage opportunities |
-| `/book <token_id>` | CLOB order book for any token |
-| `/points` | Your points & Pro status |
-| `/leaderboard` | Top 10 users |
-| `/stats` | Performance stats |
-| `/pause` | Pause trading |
-| `/resume` | Resume trading |
-| `/dryrun on\|off` | Toggle dry-run mode |
-| `/settarget <0.xx>` | Set arbitrage target sum |
-| `/setsize <N>` | Set trade size |
-| `/pnl` | Today's P&L |
-| `/backtest` | Run historical backtest |
-
-## Strategy
-
-**Dynamic Sum Arbitrage**: Buy both YES and NO when `YES_price + NO_price < target_sum`
-
-```
-Edge  = (1 - sum) / 2
-Profit = position_size × edge (per leg)
-```
-
-This is mathematically guaranteed profit when both legs resolve.
-
-## Risk Warning
-
-**HIGH RISK**: Prediction market trading can result in total loss of capital. Always start with `DRY_RUN=true` and only use capital you can afford to lose.
-
-## Wallet
-
-Creator wallet (Polygon): `0x74299c15CcEf4b48B06633E44F4F131209E0d233`
+Creator wallet: `0x74299c15CcEf4b48B06633E44F4F131209E0d233`
